@@ -1,0 +1,19 @@
+---
+description: Docker, deployment, and installer script safety conventions
+globs: step-ui-go/Dockerfile,step-ui-go/entrypoint.sh,docker-compose.yml,install.sh,step-ca-bootstrap.sh
+alwaysApply: false
+---
+
+# Deployment and Docker Safety
+
+- **Services Architecture**:
+  - Three services in `docker-compose.yml`: `postgres` (16-alpine), `step-ca`, `step-ui` (Go on Alpine 3.19).
+  - Pinned images: `STEP_CA_IMAGE` must default to a pinned release (e.g. `smallstep/step-ca:0.30.2`), never unpinned `latest`.
+- **Data Protection & Volumes**:
+  - Persistent volumes: `postgres-data`, `step-ca-data`, `step-ui-certs`, `step-ui-ssl`, `step-ui-data`, `step-ui-uploads`.
+  - NEVER execute `docker compose down -v` or prune named volumes.
+  - Installer (`install.sh`) `--mode update` must create backup first and preserve `.env` and volume data.
+- **Ports & Security**:
+  - UI listens on `8443` inside container; external port set via `UI_HTTPS_PORT` (default `443`).
+  - Step-CA API port `9443` is internal-only to `step-net` by default.
+  - Root certificates are mounted read-only (`:ro`) into `step-ui`.

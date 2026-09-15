@@ -1,0 +1,24 @@
+---
+description: Database layer conventions, raw SQL queries, and idempotent migrations
+globs: step-ui-go/db/**/*.go
+alwaysApply: false
+---
+
+# Database Layer Conventions
+
+- **Engine & Libraries**:
+  - PostgreSQL 16 driver: `github.com/lib/pq` with standard library `database/sql`.
+  - Do not introduce ORMs (e.g., GORM, ent) or external migration tools.
+- **Query Patterns**:
+  - Always use parameterized queries (`$1, $2, ...`) to prevent SQL injection.
+  - For transactions, use `tx, err := d.Begin()` with explicit `defer tx.Rollback()`.
+  - Handle `sql.ErrNoRows` gracefully where missing records are an expected case.
+- **Schema & Migrations**:
+  - Schema definitions live in `InitSchema`, `InitLESchema`, `InitNotificationSchema`, and `InitPasswordResetSchema`.
+  - Schema evolutions must be idempotent:
+    - Use `CREATE TABLE IF NOT EXISTS ...`
+    - Use `ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...`
+    - Use `CREATE INDEX IF NOT EXISTS ...`
+- **Data Integrity**:
+  - Foreign keys that reference `users(id)` must specify cascading rules (e.g. `ON DELETE CASCADE`).
+  - Store timestamps as `TIMESTAMPTZ` with `DEFAULT NOW()`.

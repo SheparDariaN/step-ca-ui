@@ -1,0 +1,24 @@
+---
+description: Go html/template conventions, CSRF token inclusion, and theme support
+globs: step-ui-go/templates/**/*.html
+alwaysApply: false
+---
+
+# HTML Template Conventions
+
+- **Template Engine**:
+  - Go `html/template` with standard context data provided by `h.base(w, r, page)`.
+  - Base layouts: `base.html` (general app) and `admin_base.html` (admin workspace).
+- **Forms & CSRF**:
+  - Every `<form method="POST">` MUST include the CSRF token:
+    ```html
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    ```
+  - When inside loops or with-blocks, reference root token as `{{$.CSRFToken}}`.
+- **UI & Theme**:
+  - Root element must preserve `lang="ru"` and theme bindings:
+    `data-theme="{{if .Session.Theme}}{{if eq .Session.Theme "auto"}}dark{{else}}{{.Session.Theme}}{{end}}{{else}}dark{{end}}"`.
+  - Use semantic component classes from `static/css/components.css` (`.card`, `.btn`, `.btn-primary`, `.badge`, `.table-wrap`, `.form-group`).
+  - Keep UI copy in Russian; align with existing naming (`Выпустить`, `Отзыв`, `Дашборд`).
+- **Security**:
+  - Rely on Go template auto-escaping. Never use raw unescaped HTML for user-provided data.

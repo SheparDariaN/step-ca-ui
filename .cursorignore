@@ -1,0 +1,27 @@
+# Secrets and credentials
+.env
+*.env
+*.env.local
+credentials.txt
+
+# SSL certificates and private keys
+step-ui-go/ssl/
+ssl/
+certs/
+uploads/
+
+# Backups and SQL dumps
+backups/
+.backup-*/
+*.db
+*.sqlite
+*.sql.gz
+
+# Go binaries and build artifacts
+step-ui-go/step-ui
+step-ui-go/*.exe
+step-ui-go/vendor/
+
+# Logs and runtime data
+*.log
+data/

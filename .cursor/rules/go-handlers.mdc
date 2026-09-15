@@ -1,0 +1,29 @@
+---
+description: Go HTTP handler conventions, routing groups, CSRF enforcement, and template rendering
+globs: step-ui-go/handlers/**/*.go
+alwaysApply: false
+---
+
+# Go Handlers Conventions
+
+- **Routing & Roles**:
+  - Register new endpoints in `step-ui-go/main.go` inside the appropriate `chi` sub-router group.
+  - Enforce access levels via `mw.RequireLogin(store)` and `mw.RequireRole(minRole, store)`.
+  - Roles hierarchy: `viewer` (1) < `manager` (2) < `admin` (3).
+- **CSRF Enforcement**:
+  - Every mutation (POST) handler MUST validate CSRF:
+    ```go
+    if !h.requireCSRF(w, r, "/target-page") {
+        return
+    }
+    ```
+- **Context & Rendering**:
+  - Initialize view data with `data := h.base(w, r, "activePageName")`.
+  - Pass flash notifications via `h.flash(w, r, "ok"|"err"|"warn", "message")`.
+  - Render with `h.render(w, "template_name", data)`.
+  - For new pages, register the template name in `h.loadTemplates()` in `step-ui-go/handlers/handler.go`.
+  - Names starting with `admin_` or `"admin"` automatically wrap with `templates/admin_base.html`; all others use `templates/base.html`.
+- **Security & Privacy**:
+  - Never log raw passwords, reset tokens, or private keys.
+  - Record administrative and security actions via `appdb.LogAuth` or audit log helpers.
+  - Return neutral responses on public user-recovery endpoints to prevent enumeration.

@@ -1,0 +1,21 @@
+---
+description: Core stack invariants, prohibited tools, and verification commands
+alwaysApply: true
+---
+
+# Core Project Invariants
+
+- **Stack**: Go 1.22 + `chi/v5` router + PostgreSQL 16 + SSR `html/template` + vanilla JS + `step` CLI.
+- **Prohibited**: Never add ORMs (GORM), Redis, React/Vue/SPA frameworks, npm packages, or bundlers.
+- **Ignore paths**: Never scan or commit `.env`, `credentials.txt`, `backups/`, `step-ui-go/ssl/`, or DB files.
+- **Security**:
+  - All POST endpoints must enforce CSRF validation (`h.requireCSRF` / `h.csrfOK`).
+  - Gated routes must declare correct role levels (`viewer` < `manager` < `admin`).
+  - Passwords use bcrypt; keep legacy SHA-256 verification and rehash compatibility.
+  - UI copy and alerts are in Russian; never paraphrase canonical security/error strings.
+  - Admin console commands must be strictly chosen from the predefined allowlist.
+- **Verification commands**:
+  - `cd step-ui-go && gofmt -w .`
+  - `cd step-ui-go && go vet ./...`
+  - `cd step-ui-go && go test ./...`
+- See `AGENTS.md` for task routing map and `docs/` for deep architectural contracts.

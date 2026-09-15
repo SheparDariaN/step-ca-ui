@@ -1,0 +1,20 @@
+---
+description: Vanilla JavaScript and CSS styling conventions without bundler or npm
+globs: step-ui-go/static/**/*.{js,css}
+alwaysApply: false
+---
+
+# Frontend Conventions
+
+- **No Build Tools**:
+  - Vanilla JS and plain CSS served directly by Go static handler.
+  - Do NOT introduce npm packages, Webpack, Vite, Tailwind, or SPA frameworks.
+- **JavaScript Standards**:
+  - Vanilla ES6+, scoped in IIFEs where appropriate (e.g. `(function () { ... })();`).
+  - Prefer event delegation on `document` instead of inline HTML onclick attributes.
+  - Implement accessible controls (e.g. `Escape` key closes dropdowns in `topnav.js`).
+  - Use vanilla fetch for JSON endpoints with proper `Content-Type` and error handling.
+- **CSS & Theming**:
+  - Follow variables defined in `static/css/themes.css` (`--bg-primary`, `--text-primary`, `--accent`, `--border-color`).
+  - Support themes: `dark`, `light`, `blue`, and `auto`.
+  - Keep styling modular: `themes.css` (variables), `base.css` (layout), `components.css` (reusable widgets), `admin.css` (admin space).
