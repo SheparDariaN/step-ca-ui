@@ -52,6 +52,7 @@ Three background routines run concurrently within the `step-ui` process:
    - UI connects to an existing Smallstep CA (e.g. running natively under systemd on Ubuntu 24 or an external server).
    - Configuration is managed in the Web UI under `/admin/ca` and stored in PostgreSQL (`ca_settings`), with passwords encrypted via AES-256-GCM.
    - CA certificates can be provided either via direct PEM upload in the Web UI or via `CA_HOST_PATH` bind-mount (`docker-compose.external.yml`).
+   - If the native CA runs on the same Docker host and its DNS name resolves to `127.0.0.1` on the host, set `CA_PUBLIC_HOST` so Compose adds `extra_hosts: <name>:host-gateway`. Otherwise `step ca health` from `step-ui` dials the container loopback.
    - Requires a password-protected JWK provisioner with valid duration claims up to 10 years (`87600h`):
      ```bash
      step ca provisioner add admin --type JWK --create --x509-default-dur 8760h --x509-max-dur 87600h

@@ -31,6 +31,7 @@ services:
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "${CA_PUBLIC_HOST:-host.docker.internal}:host-gateway"
     ports:
       - "${UI_HTTPS_PORT:-443}:8443"
     volumes:

@@ -79,7 +79,7 @@
         <label>
           <span>CA URL (HTTPS)</span>
           <input type="url" name="ca_url" value="{{if .Settings.CAURL}}{{.Settings.CAURL}}{{else}}{{.CARuntime.URL}}{{end}}" placeholder="https://ca.lan:9443 или https://192.168.1.50:9443" required>
-          <span class="hint" style="font-size:12px;color:var(--muted)">Адрес API step-ca. Если CA запущен на хосте Docker, используйте IP хоста или DNS-имя.</span>
+          <span class="hint" style="font-size:12px;color:var(--muted)">Адрес API step-ca. localhost/127.0.0.1 из контейнера — это loopback UI, а не CA на хосте. Для CA на этом сервере задайте CA_PUBLIC_HOST в .env (DNS-имя без порта) и пересоздайте step-ui.</span>
         </label>
 
         <label>

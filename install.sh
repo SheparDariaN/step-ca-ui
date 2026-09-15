@@ -76,6 +76,8 @@ t() {
     en:ca_mode_external) echo "External (native Step-CA on host or remote server)" ;;
     ru:ca_host_path_prompt) echo "Каталог нативного CA для bind-mount (Enter если удалённый или загрузка PEM в UI)" ;;
     en:ca_host_path_prompt) echo "Native CA host directory for bind-mount (Enter if remote or uploading PEM in UI)" ;;
+    ru:ca_public_host_prompt) echo "DNS-имя CA на этом хосте для extra_hosts (Enter если CA удалённый)" ;;
+    en:ca_public_host_prompt) echo "CA DNS name on this host for extra_hosts (Enter if CA is remote)" ;;
     ru:banner_title) echo "STEP-CA UI — установка и обновление" ;;
     en:banner_title) echo "STEP-CA UI — install and update" ;;
     ru:banner_sub) echo "Self-hosted PKI management для вашей сети" ;;
@@ -546,11 +548,16 @@ install_mode() {
   printf "  ${C_BOLD}%s:${C_RESET}\n" "$(t ca_mode_prompt)"
   printf "    ${C_BOLD}[1]${C_RESET} %s\n" "$(t ca_mode_bundled)"
   printf "    ${C_BOLD}[2]${C_RESET} %s\n" "$(t ca_mode_external)"
-  local ca_mode_choice ca_mode="bundled" compose_file="docker-compose.yml:docker-compose.bundled.yml" ca_host_path=""
+  local ca_mode_choice ca_mode="bundled" compose_file="docker-compose.yml:docker-compose.bundled.yml" ca_host_path="" ca_public_host=""
   ca_mode_choice="$(ask "$(t ca_mode_prompt)" "1")"
   if [[ "$ca_mode_choice" == "2" || "$ca_mode_choice" =~ ^(external|ext)$ ]]; then
     ca_mode="external"
     ca_host_path="$(ask "$(t ca_host_path_prompt)" "")"
+    ca_public_host="$(ask "$(t ca_public_host_prompt)" "")"
+    ca_public_host="${ca_public_host#https://}"
+    ca_public_host="${ca_public_host#http://}"
+    ca_public_host="${ca_public_host%%/*}"
+    ca_public_host="${ca_public_host%%:*}"
     if [[ -n "$ca_host_path" ]]; then
       compose_file="docker-compose.yml:docker-compose.external.yml"
     else
@@ -596,6 +603,9 @@ COMPOSE_FILE=${compose_file}
 EOF
     if [[ -n "$ca_host_path" ]]; then
       echo "CA_HOST_PATH=${ca_host_path}" >> .env
+    fi
+    if [[ -n "$ca_public_host" ]]; then
+      echo "CA_PUBLIC_HOST=${ca_public_host}" >> .env
     fi
     cat >> .env <<EOF
 HOST_IP=${host_ip}
