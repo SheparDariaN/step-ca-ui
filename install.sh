@@ -258,24 +258,23 @@ PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
 
 SUDO=""
+DOCKER_SUDO=""
 PKG_MANAGER=""
 COMPOSE_CMD=()
 
 docker_cmd() {
-  $SUDO docker "$@"
+  $DOCKER_SUDO docker "$@"
 }
 
 compose() {
-  $SUDO "${COMPOSE_CMD[@]}" "$@"
+  $DOCKER_SUDO "${COMPOSE_CMD[@]}" "$@"
 }
 
 check_environment() {
   say_step "$(t checking_env)"
   {
     if [[ $EUID -ne 0 ]]; then
-      if command -v docker >/dev/null 2>&1; then
-        SUDO=""
-      elif command -v sudo >/dev/null 2>&1; then
+      if command -v sudo >/dev/null 2>&1; then
         SUDO="sudo"
       else
         die "$(t no_sudo)"
@@ -298,28 +297,48 @@ check_environment() {
 
 check_docker() {
   say_step "$(t checking_docker)"
+  local docker_err=""
   {
     if ! command -v docker >/dev/null 2>&1; then
       _log "Docker not found — installing via get.docker.com"
       if ! command -v curl >/dev/null 2>&1; then
         if [[ "$PKG_MANAGER" == "apt" ]]; then $SUDO apt-get update -qq && $SUDO apt-get install -y -qq curl
         elif [[ -n "$PKG_MANAGER" ]]; then $SUDO "$PKG_MANAGER" install -y curl
-        else die "curl is required"; fi
+        else docker_err="curl is required"; fi
       fi
-      curl -fsSL https://get.docker.com | $SUDO sh
-      $SUDO systemctl enable --now docker
+      if [[ -z "$docker_err" ]]; then
+        curl -fsSL https://get.docker.com | $SUDO sh
+        $SUDO systemctl enable --now docker
+      fi
     fi
 
-    if docker compose version >/dev/null 2>&1; then
-      COMPOSE_CMD=(docker compose)
-    elif command -v docker-compose >/dev/null 2>&1; then
-      COMPOSE_CMD=(docker-compose)
-    else
-      die "$(t compose_missing)"
+    if [[ -z "$docker_err" ]]; then
+      if docker compose version >/dev/null 2>&1; then
+        COMPOSE_CMD=(docker compose)
+      elif command -v docker-compose >/dev/null 2>&1; then
+        COMPOSE_CMD=(docker-compose)
+      else
+        docker_err="$(t compose_missing)"
+      fi
     fi
 
-    docker_cmd info >/dev/null 2>&1 || die "$(t docker_not_running)"
+    if [[ -z "$docker_err" ]]; then
+      if docker info >/dev/null 2>&1; then
+        DOCKER_SUDO=""
+      elif [[ -n "$SUDO" ]] && $SUDO docker info >/dev/null 2>&1; then
+        DOCKER_SUDO="sudo"
+        local current_user
+        current_user="$(id -un)"
+        if getent group docker >/dev/null 2>&1 && ! id -nG "$current_user" | grep -qw docker; then
+          $SUDO usermod -aG docker "$current_user" || true
+          _log "Added $current_user to docker group; using sudo until re-login"
+        fi
+      else
+        docker_err="$(t docker_not_running)"
+      fi
+    fi
   } >>"$LOG_FILE" 2>&1
+  [[ -z "$docker_err" ]] || die "$docker_err"
   say_ok
 }
 
