@@ -222,7 +222,8 @@ func publicKeysEqual(a, b interface{}) bool {
 }
 
 func (h *Handler) validateCertificateChain(cert *x509.Certificate) error {
-	root, err := readPEMCert(h.cfg.RootCert)
+	ca := h.CA()
+	root, err := readPEMCert(ca.RootCert)
 	if err != nil {
 		return err
 	}

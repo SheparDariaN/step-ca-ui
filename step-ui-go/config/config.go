@@ -20,6 +20,8 @@ type Config struct {
 	UploadDir     string
 	SSLCert       string
 	SSLKey        string
+	CAMode        string
+	CAHostPath    string
 }
 
 func Load() *Config {
@@ -39,6 +41,8 @@ func Load() *Config {
 		UploadDir:     "/opt/step-ui/uploads",
 		SSLCert:       "/opt/step-ui/ssl/server.crt",
 		SSLKey:        "/opt/step-ui/ssl/server.key",
+		CAMode:        getEnv("CA_MODE", "bundled"),
+		CAHostPath:    getEnv("CA_HOST_PATH", ""),
 	}
 }
 

@@ -150,7 +150,9 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(chiMiddleware.Recoverer)
 	r.Use(chiMiddleware.RealIP)
-	r.Use(mw.SecurityHeaders(cfg.EnableHSTS))
+	r.Use(mw.SecurityHeaders(func() bool {
+		return h.CA().EnableHSTS
+	}))
 
 	// Публичные маршруты
 	r.Get("/login", h.LoginGet)
@@ -222,6 +224,9 @@ func main() {
 			r.Get("/admin/notifications", h.AdminNotificationsGet)
 			r.Post("/admin/notifications", h.AdminNotificationsPost)
 			r.Post("/admin/notifications/test", h.AdminNotificationsTest)
+			r.Get("/admin/ca", h.AdminCAGet)
+			r.Post("/admin/ca", h.AdminCAPost)
+			r.Post("/admin/ca/test", h.AdminCATestPost)
 		})
 
 		// Let's Encrypt (manager+)

@@ -23,6 +23,7 @@ import (
 type backupManifest struct {
 	Format     string            `json:"format"`
 	CreatedAt  string            `json:"created_at"`
+	CAMode     string            `json:"ca_mode"`
 	Version    string            `json:"version"`
 	BuildDate  string            `json:"build_date"`
 	GitCommit  string            `json:"git_commit"`
@@ -76,6 +77,7 @@ func (h *Handler) buildBackupBundle(ctx context.Context) (string, string, error)
 	manifest := backupManifest{
 		Format:     "step-ca-ui-backup-v1",
 		CreatedAt:  time.Now().UTC().Format(time.RFC3339),
+		CAMode:     h.CA().Mode,
 		Version:    Version,
 		BuildDate:  BuildDate,
 		GitCommit:  GitCommit,
@@ -106,38 +108,42 @@ func (h *Handler) buildBackupBundle(ctx context.Context) (string, string, error)
 		addFile("postgres", sqlPath, "pg_dump custom-free plain SQL")
 	}
 
-	for _, item := range []struct {
+	type backupTarget struct {
 		name   string
 		source string
 		target string
-	}{
-		{"step-ca-data", "/home/step", "step-ca-data.tgz"},
-		{"step-ui-data", "/opt/step-ui/data", "step-ui-data.tgz"},
-		{"step-ui-certs", h.cfg.CertsDir, "step-ui-certs.tgz"},
-		{"step-ui-uploads", h.cfg.UploadDir, "step-ui-uploads.tgz"},
-	} {
+	}
+	var targets []backupTarget
+	if h.CA().Mode == "bundled" {
+		targets = append(targets, backupTarget{"step-ca-data", "/home/step", "step-ca-data.tgz"})
+	}
+	targets = append(targets,
+		backupTarget{"step-ui-data", "/opt/step-ui/data", "step-ui-data.tgz"},
+		backupTarget{"step-ui-certs", h.cfg.CertsDir, "step-ui-certs.tgz"},
+		backupTarget{"step-ui-uploads", h.cfg.UploadDir, "step-ui-uploads.tgz"},
+	)
+
+	var bundleFiles []string
+	manifestPath := filepath.Join(tmp, "manifest.json")
+	bundleFiles = append(bundleFiles, manifestPath, sqlPath)
+
+	for _, item := range targets {
 		target := filepath.Join(tmp, item.target)
 		if err := writeDirTGZ(item.source, target); err != nil {
 			manifest.Warnings = append(manifest.Warnings, fmt.Sprintf("%s failed: %v", item.name, err))
 			continue
 		}
 		addFile(item.name, target, item.source)
+		bundleFiles = append(bundleFiles, target)
 	}
 
-	manifestPath := filepath.Join(tmp, "manifest.json")
 	if err := writeManifest(manifestPath, manifest); err != nil {
 		return "", "", err
 	}
 
 	bundleName := fmt.Sprintf("step-ca-ui-backup-%s.tgz", ts)
 	bundlePath := filepath.Join(tmp, bundleName)
-	if err := writeBundleTGZ(bundlePath, []string{manifestPath,
-		filepath.Join(tmp, "postgres-stepui.sql"),
-		filepath.Join(tmp, "step-ca-data.tgz"),
-		filepath.Join(tmp, "step-ui-data.tgz"),
-		filepath.Join(tmp, "step-ui-certs.tgz"),
-		filepath.Join(tmp, "step-ui-uploads.tgz"),
-	}); err != nil {
+	if err := writeBundleTGZ(bundlePath, bundleFiles); err != nil {
 		return "", "", err
 	}
 	return bundlePath, bundleName, nil

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -36,23 +37,32 @@ type adminConsoleResult struct {
 	Success     bool
 }
 
-func adminConsoleCommands() []adminConsoleCommand {
-	return []adminConsoleCommand{
+func (h *Handler) adminConsoleCommands() []adminConsoleCommand {
+	ca := h.CA()
+	dfPaths := []string{"-h", "/opt/step-ui"}
+	if ca.Mode == "bundled" || ca.HostPathMounted {
+		if _, err := os.Stat("/home/step"); err == nil {
+			dfPaths = append(dfPaths, "/home/step")
+		}
+	}
+
+	cmds := []adminConsoleCommand{
 		{ID: "system.date", Label: "Дата и время", Description: "Текущее время внутри контейнера step-ui", Name: "date"},
 		{ID: "system.hostname", Label: "Hostname", Description: "Имя контейнера", Name: "hostname"},
 		{ID: "system.identity", Label: "Текущий пользователь", Description: "UID/GID процесса приложения", Name: "id"},
-		{ID: "system.disk", Label: "Диск", Description: "Свободное место для каталогов приложения и CA", Name: "df", Args: []string{"-h", "/opt/step-ui", "/home/step"}},
+		{ID: "system.disk", Label: "Диск", Description: "Свободное место для каталогов приложения и CA", Name: "df", Args: dfPaths},
 		{ID: "system.processes", Label: "Процессы", Description: "Список процессов внутри контейнера", Name: "ps"},
 		{ID: "app.files", Label: "Каталоги приложения", Description: "Верхний уровень /opt/step-ui", Name: "ls", Args: []string{"-la", "/opt/step-ui"}},
 		{ID: "step.version", Label: "step version", Description: "Версия Smallstep CLI внутри контейнера", Name: "step", Args: []string{"version"}},
-		{ID: "step.ca.health", Label: "step-ca health", Description: "Проверка доступности CA из контейнера UI", Name: "step", Args: []string{"ca", "health", "--ca-url", "https://step-ca:9443", "--root", "/home/step/certs/root_ca.crt"}},
+		{ID: "step.ca.health", Label: "step-ca health", Description: "Проверка доступности CA из контейнера UI", Name: "step", Args: []string{"ca", "health", "--ca-url", ca.URL, "--root", ca.RootCert}},
 		{ID: "openssl.version", Label: "OpenSSL version", Description: "Версия OpenSSL", Name: "openssl", Args: []string{"version", "-a"}},
 		{ID: "postgres.ready", Label: "PostgreSQL readiness", Description: "Проверка доступности PostgreSQL", Name: "pg_isready", Args: []string{"-h", "postgres", "-U", "stepui", "-d", "stepui"}},
 	}
+	return cmds
 }
 
-func findAdminConsoleCommand(id string) (adminConsoleCommand, bool) {
-	for _, c := range adminConsoleCommands() {
+func (h *Handler) findAdminConsoleCommand(id string) (adminConsoleCommand, bool) {
+	for _, c := range h.adminConsoleCommands() {
 		if c.ID == id {
 			return c, true
 		}
@@ -74,7 +84,7 @@ func (h *Handler) AdminConsolePost(w http.ResponseWriter, r *http.Request) {
 	data := h.adminConsoleData(w, r)
 	data["SelectedCommandID"] = commandID
 
-	c, ok := findAdminConsoleCommand(commandID)
+	c, ok := h.findAdminConsoleCommand(commandID)
 	if !ok {
 		h.auditSecurity(r, "console.denied command_id="+commandID)
 		data["ConsoleError"] = "Команда не входит в allowlist."
@@ -91,7 +101,7 @@ func (h *Handler) AdminConsolePost(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) adminConsoleData(w http.ResponseWriter, r *http.Request) map[string]interface{} {
 	data := h.base(w, r, "admin_console")
-	data["Commands"] = adminConsoleCommands()
+	data["Commands"] = h.adminConsoleCommands()
 	data["Timeout"] = adminConsoleTimeout.String()
 	data["MaxOutputKB"] = adminConsoleMaxOut / 1024
 

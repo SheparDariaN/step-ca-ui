@@ -169,11 +169,24 @@
 
   <div class="sidebar-footer">
     <div class="user-info">{{.Session.Username}} &middot; <span style="color:var(--muted);font-weight:400">{{.Session.Role}}</span></div>
-    <div style="font-size:10px;color:var(--muted)"><span class="dot"></span>CA online</div>
+    <div style="font-size:10px;color:var(--muted)">
+      <span class="dot" style="{{if not .CARuntime.Configured}}background:var(--err){{end}}"></span>
+      {{if eq .CARuntime.Mode "external"}}
+        {{if .CARuntime.Configured}}CA external{{else}}CA unconfigured{{end}}
+      {{else}}
+        CA online
+      {{end}}
+    </div>
   </div>
 </aside>
 
 <main class="main">
+  {{if and (hasRole .Session.Role "admin") (eq .CARuntime.Mode "external") (not .CARuntime.Configured)}}
+  <div class="alert alert-err" style="display:flex;align-items:center;justify-content:space-between">
+    <span><strong>Внимание:</strong> Внешний Step-CA ещё не настроен. Настройте параметры подключения и сертификаты в админ-панели.</span>
+    <a href="/admin/ca" class="btn btn-ghost" style="padding:4px 8px;font-size:12px;margin-left:12px">Настроить CA →</a>
+  </div>
+  {{end}}
   {{range .Msgs}}
   <div class="alert {{if eq .Type "ok"}}alert-ok{{else}}alert-err{{end}}">{{.Text}}</div>
   {{end}}

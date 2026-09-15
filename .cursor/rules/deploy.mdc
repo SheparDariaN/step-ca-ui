@@ -7,7 +7,8 @@ alwaysApply: false
 # Deployment and Docker Safety
 
 - **Services Architecture**:
-  - Three services in `docker-compose.yml`: `postgres` (16-alpine), `step-ca`, `step-ui` (Go on Alpine 3.19).
+  - Modular Compose setup: base `docker-compose.yml` (`postgres`, `step-ui`), bundled overlay `docker-compose.bundled.yml` (`step-ca`), optional native bind overlay `docker-compose.external.yml`.
+  - Controlled by `CA_MODE=bundled|external` in `.env`.
   - Pinned images: `STEP_CA_IMAGE` must default to a pinned release (e.g. `smallstep/step-ca:0.30.2`), never unpinned `latest`.
 - **Data Protection & Volumes**:
   - Persistent volumes: `postgres-data`, `step-ca-data`, `step-ui-certs`, `step-ui-ssl`, `step-ui-data`, `step-ui-uploads`.

@@ -136,6 +136,10 @@ func InitSchema(d *sql.DB) error {
 	_, _ = d.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ`)
 	_, _ = d.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_temporary BOOLEAN DEFAULT false`)
 	_, _ = d.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS temp_note TEXT DEFAULT ''`)
+
+	if err := InitCASchema(d); err != nil {
+		return err
+	}
 	return nil
 }
 

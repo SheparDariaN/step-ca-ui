@@ -43,6 +43,7 @@
     <details class="admin-dd">
       <summary>Сервер</summary>
       <div class="admin-dd-menu">
+        <a href="/admin/ca" class="{{if eq .ActivePage "admin_ca"}}active{{end}}">Настройки CA</a>
         <a href="/admin/console" class="{{if eq .ActivePage "admin_console"}}active{{end}}">Консоль сервера</a>
         <a href="/admin/about" class="{{if eq .ActivePage "admin_about"}}active{{end}}">О системе</a>
         <a href="/admin/integrity" class="{{if eq .ActivePage "admin_integrity"}}active{{end}}">CA integrity</a>
@@ -100,6 +101,10 @@
       </a>
 
       <div class="admin-nav-section">Сервер</div>
+      <a href="/admin/ca" class="{{if eq .ActivePage "admin_ca"}}active{{end}}">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7v5c0 5 3.5 9.5 9 11 5.5-1.5 9-6 9-11V7l-9-5z"/><polyline points="9 12 11 14 15 10"/></svg>
+        <span>Настройки CA</span>
+      </a>
       <a href="/admin/console" class="{{if eq .ActivePage "admin_console"}}active{{end}}">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
         <span>Консоль сервера</span>
@@ -135,6 +140,12 @@
   </aside>
 
   <main class="admin-main">
+    {{if and (eq .CARuntime.Mode "external") (not .CARuntime.Configured)}}
+    <div class="admin-header-banner" style="background:rgba(239,68,68,0.15);border-color:var(--err);color:#fca5a5">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span><strong>Внимание:</strong> Внешний Step-CA ещё не настроен. <a href="/admin/ca" style="color:#fff;text-decoration:underline">Настройте подключение к CA</a> для выпуска и отзыва сертификатов.</span>
+    </div>
+    {{end}}
     <div class="admin-header-banner">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7v5c0 5 3.5 9.5 9 11 5.5-1.5 9-6 9-11V7l-9-5z"/></svg>
       <span>Защищённая зона администратора. Критичные действия фиксируются в журнале.</span>

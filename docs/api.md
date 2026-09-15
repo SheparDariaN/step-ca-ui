@@ -90,3 +90,6 @@ All routes are registered in `step-ui-go/main.go` using the `chi/v5` router.
 | `GET` | `/admin/notifications` | `admin` | No | `h.AdminNotificationsGet` | Webhook and alert configuration |
 | `POST` | `/admin/notifications` | `admin` | Yes | `h.AdminNotificationsPost` | Save notification preferences |
 | `POST` | `/admin/notifications/test`| `admin` | Yes | `h.AdminNotificationsTest` | Dispatch test webhook alert |
+| `GET` | `/admin/ca` | `admin` | No | `h.AdminCAGet` | Dual CA mode and connection settings |
+| `POST` | `/admin/ca` | `admin` | Yes | `h.AdminCAPost` | Save CA settings and upload PEM certs |
+| `POST` | `/admin/ca/test` | `admin` | Yes | `h.AdminCATestPost` | Verify connection to configured CA |

@@ -37,6 +37,7 @@ Highlights:
 
 - 📋 **Certificate management** — issue, renew, revoke and import X.509 certificates
 - 👥 **Role-based access** — `admin` / `manager` / `viewer`
+- 🔄 **Dual CA mode** — run with bundled containerized `step-ca` or connect to existing native/remote Smallstep CA *(new)*
 - ⏱️ **Temporary users** — short-lived guest accounts with automatic expiration *(new in v1.4.0)*
 - 📅 **Custom date picker** — site-themed, no native browser widget *(new in v1.4.0)*
 - 🌍 **Timezone-aware** — configurable with the `TZ` environment variable
@@ -158,12 +159,17 @@ The whole thing takes 2–4 minutes on a fresh VM.
 All configuration lives in `.env`. The installer creates this file for you, but you can edit it manually:
 
 ```env
+# CA mode: bundled (Docker container) or external (native/remote step-ca)
+CA_MODE=bundled
+COMPOSE_FILE=docker-compose.yml:docker-compose.bundled.yml
+# CA_HOST_PATH=/etc/step-ca        # optional: bind mount host CA directory
+
 HOST_IP=192.168.1.100              # SAN in self-signed cert; step-ca DNS
 UI_HTTPS_PORT=443                  # external HTTPS port
 PROVISIONER=admin                  # step-ca provisioner identifier
-CA_PASSWORD=<generated>            # step-ca provisioner password
-STEP_CA_IMAGE=smallstep/step-ca:0.30.2 # pinned step-ca image
-SECRET_KEY=<generated>             # session/CSRF signing key
+CA_PASSWORD=<generated>            # step-ca provisioner password (bundled mode)
+STEP_CA_IMAGE=smallstep/step-ca:0.30.2 # pinned step-ca image (bundled mode)
+SECRET_KEY=<generated>             # session/CSRF signing key + CA password encryption
 SESSION_SECURE=true                # secure session cookie over HTTPS
 ENABLE_HSTS=false                  # enable only when using a trusted TLS certificate
 POSTGRES_PASSWORD=<generated>      # database password
@@ -171,6 +177,8 @@ TZ=UTC                             # container timezone
 STEPCA_DEFAULT_TLS_CERT_DURATION=8760h
 STEPCA_MAX_TLS_CERT_DURATION=87600h
 ```
+
+In `external` mode, parameters like CA URL, provisioner name, provisioner password, and Root/Intermediate CA certificates are configured directly from the Web UI under **Admin -> CA Settings** (`/admin/ca`).
 
 After changing `.env`, recreate the containers:
 
@@ -207,6 +215,46 @@ sudo ./install.sh --mode backup --lang en
 Backups include PostgreSQL, `step-ca-data`, Step-CA UI data/certs/uploads and
 `manifest.json` with SHA-256 checksums. Restore is manual by design; follow
 [BACKUP_RESTORE.md](BACKUP_RESTORE.md).
+</details>
+
+<details>
+<summary><b>How to create a password-protected JWK provisioner on an external step-ca (native Ubuntu 24 or remote)?</b></summary>
+
+Step-CA UI communicates with step-ca via a **JWK provisioner** with a password and supports certificate presets with validity up to 10 years (`87600h`).
+
+1. On the machine running step-ca, create a JWK provisioner with extended duration limits:
+
+```bash
+step ca provisioner add admin \
+  --type JWK \
+  --create \
+  --x509-default-dur 8760h \
+  --x509-max-dur 87600h
+```
+*(If your CA configuration is stored in a custom path, pass `--ca-config /etc/step-ca/config/ca.json`)*.
+
+The `step` CLI will prompt you for a password to encrypt the new JWK private key.
+
+2. If a provisioner with that name already exists, update its certificate duration limits:
+
+```bash
+step ca provisioner update admin \
+  --x509-default-dur 8760h \
+  --x509-max-dur 87600h \
+  --ca-config /etc/step-ca/config/ca.json
+```
+
+3. Restart the `step-ca` service to apply configuration changes:
+
+```bash
+sudo systemctl restart step-ca
+```
+
+4. In the Step-CA UI, navigate to **Admin -> CA Settings** (`/admin/ca`):
+- Enter the external CA URL (e.g. `https://192.168.1.50:9443` or `https://ca.internal:443`).
+- Enter the provisioner name (`admin`) and the password you configured.
+- Upload `root_ca.crt` and `intermediate_ca.crt` (found in your step-ca `certs/` directory) or bind-mount the path via `CA_HOST_PATH`.
+- Click **Save settings**, then **Test CA connection**.
 </details>
 
 <details>

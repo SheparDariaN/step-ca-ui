@@ -46,16 +46,17 @@ type SystemInfo struct {
 }
 
 func (h *Handler) systemInfo() SystemInfo {
+	ca := h.CA()
 	return SystemInfo{
 		Version:       Version,
 		BuildDate:     BuildDate,
 		GitCommit:     GitCommit,
 		StartedAt:     StartedAt,
 		Uptime:        fmtUptime(time.Since(StartedAt)),
-		CAURL:         h.cfg.CAURL,
-		RootCert:      h.cfg.RootCert,
-		Provisioner:   h.cfg.Provisioner,
-		PasswordFile:  h.cfg.PasswordFile,
+		CAURL:         ca.URL,
+		RootCert:      ca.RootCert,
+		Provisioner:   ca.Provisioner,
+		PasswordFile:  ca.PasswordFile,
 		StepCAImage:   h.cfg.StepCAImage,
 		CertsDir:      h.cfg.CertsDir,
 		UploadDir:     h.cfg.UploadDir,
@@ -71,33 +72,45 @@ func (h *Handler) preflight(ctx context.Context) ([]HealthCheck, HealthSummary) 
 		checks = append(checks, HealthCheck{Name: name, Status: status, Detail: detail, Critical: critical})
 	}
 
+	ca := h.CA()
+
 	if err := h.db.PingContext(ctx); err != nil {
 		add("PostgreSQL", "err", err.Error(), true)
 	} else {
 		add("PostgreSQL", "ok", "database connection is alive", true)
 	}
 
-	if out, err := runCheck(ctx, 5*time.Second, "step", "ca", "health", "--ca-url", h.cfg.CAURL, "--root", h.cfg.RootCert); err != nil {
+	if !ca.Configured {
+		add("Step-CA Config", "warn", "CA не сконфигурирован в UI (/admin/ca)", true)
+	} else if out, err := runCheck(ctx, 5*time.Second, "step", "ca", "health", "--ca-url", ca.URL, "--root", ca.RootCert); err != nil {
 		add("Step-CA API", "err", cleanCheckOutput(out, err), true)
 	} else {
 		add("Step-CA API", "ok", "CA health endpoint is reachable", true)
 	}
 
-	h.checkFile(&checks, "Root CA certificate", h.cfg.RootCert, true)
+	h.checkFile(&checks, "Root CA certificate", ca.RootCert, true)
 	h.checkFile(&checks, "Intermediate CA certificate", h.intermediateCertPath(), true)
-	h.checkFile(&checks, "Provisioner password file", h.cfg.PasswordFile, true)
+	h.checkFile(&checks, "Provisioner password file", ca.PasswordFile, true)
 	h.checkFile(&checks, "UI TLS certificate", h.cfg.SSLCert, false)
 	h.checkFile(&checks, "UI TLS private key", h.cfg.SSLKey, false)
 	h.checkDir(&checks, "Issued certificates directory", h.cfg.CertsDir, true)
 	h.checkDir(&checks, "Upload directory", h.cfg.UploadDir, false)
 
-	h.checkCAConfig(&checks)
+	if ca.Mode == "bundled" || ca.HostPathMounted {
+		h.checkCAConfig(&checks)
+	}
 	h.checkCAChain(&checks)
-	h.checkProvisionerPasswordSync(&checks)
-	h.checkStepCAImagePin(&checks)
+	if ca.Mode == "bundled" {
+		h.checkProvisionerPasswordSync(&checks)
+		h.checkStepCAImagePin(&checks)
+	}
 	h.checkDisk(&checks, h.cfg.CertsDir)
-	h.checkDisk(&checks, filepath.Dir(h.cfg.RootCert))
-	h.checkDisk(&checks, filepath.Dir(h.cfg.PasswordFile))
+	if ca.RootCert != "" {
+		h.checkDisk(&checks, filepath.Dir(ca.RootCert))
+	}
+	if ca.PasswordFile != "" {
+		h.checkDisk(&checks, filepath.Dir(ca.PasswordFile))
+	}
 
 	if h.cfg.SessionSecure {
 		add("Session cookie", "ok", "SESSION_SECURE=true", true)
@@ -111,17 +124,24 @@ func (h *Handler) preflight(ctx context.Context) ([]HealthCheck, HealthSummary) 
 
 func (h *Handler) caIntegrity(ctx context.Context) ([]HealthCheck, HealthSummary) {
 	var checks []HealthCheck
+	ca := h.CA()
 
-	if out, err := runCheck(ctx, 5*time.Second, "step", "ca", "health", "--ca-url", h.cfg.CAURL, "--root", h.cfg.RootCert); err != nil {
+	if !ca.Configured {
+		checks = append(checks, HealthCheck{Name: "Step-CA Config", Status: "warn", Detail: "CA не сконфигурирован в UI (/admin/ca)", Critical: true})
+	} else if out, err := runCheck(ctx, 5*time.Second, "step", "ca", "health", "--ca-url", ca.URL, "--root", ca.RootCert); err != nil {
 		checks = append(checks, HealthCheck{Name: "Step-CA API", Status: "err", Detail: cleanCheckOutput(out, err), Critical: true})
 	} else {
 		checks = append(checks, HealthCheck{Name: "Step-CA API", Status: "ok", Detail: "CA health endpoint is reachable", Critical: true})
 	}
 
 	h.checkCAChain(&checks)
-	h.checkCAConfig(&checks)
-	h.checkProvisionerPasswordSync(&checks)
-	h.checkStepCAImagePin(&checks)
+	if ca.Mode == "bundled" || ca.HostPathMounted {
+		h.checkCAConfig(&checks)
+	}
+	if ca.Mode == "bundled" {
+		h.checkProvisionerPasswordSync(&checks)
+		h.checkStepCAImagePin(&checks)
+	}
 
 	return checks, summarizeHealth(checks)
 }
@@ -165,7 +185,8 @@ func (h *Handler) checkDir(checks *[]HealthCheck, name, path string, critical bo
 }
 
 func (h *Handler) checkCAConfig(checks *[]HealthCheck) {
-	caConfig := filepath.Join(filepath.Dir(filepath.Dir(h.cfg.RootCert)), "config", "ca.json")
+	ca := h.CA()
+	caConfig := filepath.Join(filepath.Dir(filepath.Dir(ca.RootCert)), "config", "ca.json")
 	raw, err := os.ReadFile(caConfig)
 	if err != nil {
 		*checks = append(*checks, HealthCheck{Name: "CA config", Status: "warn", Detail: caConfig + " is not readable: " + err.Error(), Critical: false})
@@ -187,7 +208,7 @@ func (h *Handler) checkCAConfig(checks *[]HealthCheck) {
 	}
 
 	for _, p := range cfg.Authority.Provisioners {
-		if p.Name != h.cfg.Provisioner {
+		if p.Name != ca.Provisioner {
 			continue
 		}
 		*checks = append(*checks, HealthCheck{Name: "Provisioner", Status: "ok", Detail: fmt.Sprintf("%s (%s)", p.Name, p.Type), Critical: true})
@@ -196,11 +217,12 @@ func (h *Handler) checkCAConfig(checks *[]HealthCheck) {
 		return
 	}
 
-	*checks = append(*checks, HealthCheck{Name: "Provisioner", Status: "err", Detail: "provisioner " + h.cfg.Provisioner + " not found in ca.json", Critical: true})
+	*checks = append(*checks, HealthCheck{Name: "Provisioner", Status: "err", Detail: "provisioner " + ca.Provisioner + " not found in ca.json", Critical: true})
 }
 
 func (h *Handler) checkCAChain(checks *[]HealthCheck) {
-	root, err := readPEMCert(h.cfg.RootCert)
+	ca := h.CA()
+	root, err := readPEMCert(ca.RootCert)
 	if err != nil {
 		*checks = append(*checks, HealthCheck{Name: "Root CA integrity", Status: "err", Detail: err.Error(), Critical: true})
 		return
@@ -261,7 +283,8 @@ func readPEMCert(path string) (*x509.Certificate, error) {
 }
 
 func (h *Handler) checkProvisionerPasswordSync(checks *[]HealthCheck) {
-	uiPassword, err := readSecretLine(h.cfg.PasswordFile)
+	ca := h.CA()
+	uiPassword, err := readSecretLine(ca.PasswordFile)
 	if err != nil {
 		*checks = append(*checks, HealthCheck{Name: "Provisioner password sync", Status: "err", Detail: err.Error(), Critical: true})
 		return

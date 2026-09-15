@@ -103,3 +103,30 @@ type PasswordResetToken struct {
 	UsedAt    *time.Time
 	CreatedAt time.Time
 }
+
+type CASettings struct {
+	ID                  int
+	CAURL               string
+	Provisioner         string
+	EncryptedPassword   string
+	RootCertPEM         string
+	IntermediatePEM     string
+	RootFingerprint     string
+	IntermediateSubject string
+	EnableHSTS          bool
+	UpdatedAt           *time.Time
+}
+
+type CARuntime struct {
+	Mode                string // "bundled" or "external"
+	URL                 string
+	RootCert            string // path to root_ca.crt
+	IntermediateCert    string // path to intermediate_ca.crt
+	Provisioner         string
+	PasswordFile        string
+	HostPathMounted     bool
+	Configured          bool
+	EnableHSTS          bool
+	RootFingerprint     string
+	IntermediateSubject string
+}

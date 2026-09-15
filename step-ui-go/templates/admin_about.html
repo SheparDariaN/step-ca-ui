@@ -32,8 +32,11 @@
   <div class="card-body">
     <table class="tbl admin-kv-table">
       <tbody>
+        <tr><td><strong>Режим CA (CA_MODE)</strong></td><td><code>{{.CARuntime.Mode}}</code></td></tr>
         <tr><td><strong>CA URL</strong></td><td><code>{{.System.CAURL}}</code></td></tr>
+        {{if eq .CARuntime.Mode "bundled"}}
         <tr><td><strong>step-ca image</strong></td><td><code>{{.System.StepCAImage}}</code></td></tr>
+        {{end}}
         <tr><td><strong>Provisioner</strong></td><td><code>{{.System.Provisioner}}</code></td></tr>
         <tr><td><strong>Root CA</strong></td><td><code>{{.System.RootCert}}</code></td></tr>
         <tr><td><strong>Password file</strong></td><td><code>{{.System.PasswordFile}}</code></td></tr>

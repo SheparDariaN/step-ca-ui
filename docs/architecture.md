@@ -40,6 +40,24 @@ Three background routines run concurrently within the `step-ui` process:
 2. **Let's Encrypt Auto-Renewer**: Goroutine in `step-ui-go/le/renewer.go` checking active ACME certificates for renewal threshold.
 3. **Notification Dispatcher**: Worker in `step-ui-go/handlers/notifications.go` processing scheduled certificate expiry alerts and webhook dispatch.
 
+## CA Operational Modes
+
+1. **Bundled Mode (`CA_MODE=bundled`, default)**:
+   - Uses `docker-compose.bundled.yml` to launch a dedicated containerized Smallstep CA (`step-ca:9443`).
+   - Certificates and configuration are mounted from the `step-ca-data` volume into `/home/step:ro`.
+   - UI automatically connects to `https://step-ca:9443` and validates password synchronization.
+
+2. **External Mode (`CA_MODE=external`)**:
+   - `step-ca` container is not launched by Docker Compose.
+   - UI connects to an existing Smallstep CA (e.g. running natively under systemd on Ubuntu 24 or an external server).
+   - Configuration is managed in the Web UI under `/admin/ca` and stored in PostgreSQL (`ca_settings`), with passwords encrypted via AES-256-GCM.
+   - CA certificates can be provided either via direct PEM upload in the Web UI or via `CA_HOST_PATH` bind-mount (`docker-compose.external.yml`).
+   - Requires a password-protected JWK provisioner with valid duration claims up to 10 years (`87600h`):
+     ```bash
+     step ca provisioner add admin --type JWK --create --x509-default-dur 8760h --x509-max-dur 87600h
+     sudo systemctl restart step-ca
+     ```
+
 ## What is NOT in the Stack
 
 To prevent architectural drift, the following technologies are strictly forbidden:

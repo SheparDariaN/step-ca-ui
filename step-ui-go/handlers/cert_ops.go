@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"step-ui/config"
 	appdb "step-ui/db"
 	"step-ui/models"
 )
@@ -61,13 +60,17 @@ func normalizeIssuePolicy(template, duration, keyType, domain string) (IssuePoli
 	return policy, nil
 }
 
-func issueCert(domain, certPath, keyPath, duration, keyType string, cfg *config.Config) error {
+func (h *Handler) issueCert(domain, certPath, keyPath, duration, keyType string) error {
+	ca := h.CA()
+	if !ca.Configured {
+		return fmt.Errorf("Step-CA не настроен. Настройте подключение в разделе Админ -> Настройки CA (/admin/ca)")
+	}
 	args := []string{
 		"ca", "certificate",
-		"--ca-url", cfg.CAURL,
-		"--root", cfg.RootCert,
-		"--provisioner", cfg.Provisioner,
-		"--provisioner-password-file", cfg.PasswordFile,
+		"--ca-url", ca.URL,
+		"--root", ca.RootCert,
+		"--provisioner", ca.Provisioner,
+		"--provisioner-password-file", ca.PasswordFile,
 		"--not-after", duration,
 		"--force",
 	}
@@ -86,12 +89,17 @@ func issueCert(domain, certPath, keyPath, duration, keyType string, cfg *config.
 	return nil
 }
 
-func revokeStep(certPath, keyPath string, cfg *config.Config) {
+func (h *Handler) revokeStep(certPath, keyPath string) {
+	ca := h.CA()
+	if !ca.Configured {
+		log.Printf("[step-cli] revoke skipped: CA not configured")
+		return
+	}
 	exec.Command("step", "ca", "revoke",
 		"--cert", certPath,
 		"--key", keyPath,
-		"--ca-url", cfg.CAURL,
-		"--root", cfg.RootCert,
+		"--ca-url", ca.URL,
+		"--root", ca.RootCert,
 	).Run()
 }
 

@@ -1,0 +1,7 @@
+services:
+  # ─── Step-CA UI bind mount to native host CA ──────────────────────────────
+  step-ui:
+    volumes:
+      - "${CA_HOST_PATH}:/home/step:ro"
+    environment:
+      ROOT_CERT: "/home/step/certs/root_ca.crt"

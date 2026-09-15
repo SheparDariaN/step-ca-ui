@@ -19,12 +19,17 @@ import (
 
 func (h *Handler) Home(w http.ResponseWriter, r *http.Request) {
 	// Статус CA: проверяем через step ca health
+	ca := h.CA()
 	caOnline := true
-	_, err := exec.Command("step", "ca", "health",
-		"--ca-url", h.cfg.CAURL,
-		"--root", h.cfg.RootCert).Output()
-	if err != nil {
+	if !ca.Configured {
 		caOnline = false
+	} else {
+		_, err := exec.Command("step", "ca", "health",
+			"--ca-url", ca.URL,
+			"--root", ca.RootCert).Output()
+		if err != nil {
+			caOnline = false
+		}
 	}
 
 	// Быстрая статистика по активным сертификатам
@@ -45,6 +50,8 @@ func (h *Handler) Home(w http.ResponseWriter, r *http.Request) {
 
 	data := h.base(w, r, "home")
 	data["CAOnline"] = caOnline
+	data["CAMode"] = ca.Mode
+	data["CAConfigured"] = ca.Configured
 	data["Uptime"] = fmtUptime(time.Since(StartedAt))
 	data["ActiveCerts"] = activeCount
 	data["ExpiringCerts"] = expiringCount
@@ -174,7 +181,7 @@ func (h *Handler) IssuePost(w http.ResponseWriter, r *http.Request) {
 	os.MkdirAll(certDir, 0755)
 	certPath := filepath.Join(certDir, "certificate.crt")
 	keyPath := filepath.Join(certDir, "private.key")
-	if err := issueCert(domain, certPath, keyPath, policy.Duration, policy.KeyType, h.cfg); err != nil {
+	if err := h.issueCert(domain, certPath, keyPath, policy.Duration, policy.KeyType); err != nil {
 		h.notifyAsync("", "certificate.issue_failed", "error",
 			"Certificate issue failed",
 			fmt.Sprintf("Не удалось выпустить сертификат %s для %s: %s", name, domain, err.Error()),
@@ -202,7 +209,7 @@ func (h *Handler) Renew(w http.ResponseWriter, r *http.Request) {
 		if keyType == "" {
 			keyType = "EC:P-256"
 		}
-		if err := issueCert(c.Domain, c.CertPath, c.KeyPath, "8760h", keyType, h.cfg); err == nil {
+		if err := h.issueCert(c.Domain, c.CertPath, c.KeyPath, "8760h", keyType); err == nil {
 			issued, expires, serial, _ := parseCertDates(c.CertPath)
 			appdb.InsertCert(h.db, &models.Certificate{
 				Name: c.Name, Domain: c.Domain, CertPath: c.CertPath, KeyPath: c.KeyPath,
@@ -226,7 +233,7 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
 	c, _ := appdb.GetCert(h.db, id)
 	if c != nil {
-		revokeStep(c.CertPath, c.KeyPath, h.cfg)
+		h.revokeStep(c.CertPath, c.KeyPath)
 		appdb.UpdateCertStatus(h.db, id, "revoked")
 		appdb.InsertHistory(h.db, "revoke", c.Name, c.Domain, "Отозван (CRL)", si.Username, si.Role)
 		h.flash(w, r, "ok", "Сертификат отозван")
@@ -235,7 +242,8 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DownloadCA(w http.ResponseWriter, r *http.Request) {
-	h.serveCAFile(w, r, h.cfg.RootCert, "home-ca-root.crt")
+	ca := h.CA()
+	h.serveCAFile(w, r, ca.RootCert, "home-ca-root.crt")
 }
 
 func (h *Handler) DownloadIntermediateCA(w http.ResponseWriter, r *http.Request) {
@@ -249,7 +257,8 @@ func (h *Handler) DownloadFullChain(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	root, err := os.ReadFile(h.cfg.RootCert)
+	ca := h.CA()
+	root, err := os.ReadFile(ca.RootCert)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -268,7 +277,19 @@ func (h *Handler) DownloadFullChain(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) intermediateCertPath() string {
-	return filepath.Join(filepath.Dir(h.cfg.RootCert), "intermediate_ca.crt")
+	if h.resolver != nil {
+		ca := h.resolver.Runtime()
+		if ca.IntermediateCert != "" {
+			return ca.IntermediateCert
+		}
+		if ca.RootCert != "" {
+			return filepath.Join(filepath.Dir(ca.RootCert), "intermediate_ca.crt")
+		}
+	}
+	if h.cfg.RootCert != "" {
+		return filepath.Join(filepath.Dir(h.cfg.RootCert), "intermediate_ca.crt")
+	}
+	return ""
 }
 
 func (h *Handler) serveCAFile(w http.ResponseWriter, r *http.Request, path, filename string) {

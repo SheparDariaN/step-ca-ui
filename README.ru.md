@@ -37,6 +37,7 @@
 
 - 📋 **Управление сертификатами** — выпуск, перевыпуск, отзыв и импорт X.509
 - 👥 **Ролевая модель** — `admin` / `manager` / `viewer`
+- 🔄 **Двойной режим CA (Dual CA)** — работа со встроенным контейнером step-ca или подключение к уже существующему нативному/удалённому CA *(новинка)*
 - ⏱️ **Временные пользователи** — гостевые аккаунты с автоматическим истечением *(новинка v1.4.0)*
 - 📅 **Кастомный date picker** — в стиле сайта, без браузерного виджета *(новинка v1.4.0)*
 - 🌍 **Учёт часового пояса** — настраивается через переменную `TZ`
@@ -159,12 +160,17 @@ sudo ./install.sh --mode update --lang ru
 Все настройки в `.env`. Установщик создаёт его автоматически, но вы можете редактировать вручную:
 
 ```env
+# Режим CA: bundled (в Docker) или external (нативный/удалённый step-ca)
+CA_MODE=bundled
+COMPOSE_FILE=docker-compose.yml:docker-compose.bundled.yml
+# CA_HOST_PATH=/etc/step-ca        # опционально: bind mount каталога CA с хоста
+
 HOST_IP=192.168.1.100              # SAN в self-signed серте; DNS-имя для step-ca
 UI_HTTPS_PORT=443                  # внешний HTTPS-порт
-PROVISIONER=admin                  # идентификатор provisioner'а step-ca
-CA_PASSWORD=<сгенерировано>        # пароль provisioner'а step-ca
-STEP_CA_IMAGE=smallstep/step-ca:0.30.2 # закреплённый step-ca image
-SECRET_KEY=<сгенерировано>         # ключ подписи сессий и CSRF
+PROVISIONER=admin                  # идентификатор provisioner'а step-ca (в bundled)
+CA_PASSWORD=<сгенерировано>        # пароль provisioner'а step-ca (в bundled)
+STEP_CA_IMAGE=smallstep/step-ca:0.30.2 # закреплённый step-ca image (в bundled)
+SECRET_KEY=<сгенерировано>         # ключ подписи сессий, CSRF и шифрования паролей CA
 SESSION_SECURE=true                # secure cookie сессии для HTTPS
 ENABLE_HSTS=false                  # включайте только с доверенным TLS-сертификатом
 POSTGRES_PASSWORD=<сгенерировано>  # пароль базы
@@ -172,6 +178,8 @@ TZ=UTC                             # часовой пояс контейнер�
 STEPCA_DEFAULT_TLS_CERT_DURATION=8760h
 STEPCA_MAX_TLS_CERT_DURATION=87600h
 ```
+
+В режиме `external` параметры URL CA, имя provisioner, пароль и сертификаты Root/Intermediate настраиваются прямо через браузер в разделе **Админ -> Настройки CA** (`/admin/ca`).
 
 После изменения `.env` пересоздайте контейнеры:
 
@@ -208,6 +216,46 @@ sudo ./install.sh --mode backup --lang ru
 Бэкап включает PostgreSQL, `step-ca-data`, данные/сертификаты/uploads Step-CA UI
 и `manifest.json` с SHA-256 checksums. Restore намеренно ручной; инструкция в
 [BACKUP_RESTORE.md](BACKUP_RESTORE.md).
+</details>
+
+<details>
+<summary><b>Как создать провизионер с паролем на внешнем step-ca (нативном Ubuntu 24 или удалённом)?</b></summary>
+
+Step-CA UI взаимодействует со step-ca через **JWK-провизионер** с паролем и выпускает сертификаты со сроками действия до 10 лет (`87600h`).
+
+1. На сервере со step-ca выполните команду создания JWK-провизионера с увеличенными лимитами срока действия:
+
+```bash
+step ca provisioner add admin \
+  --type JWK \
+  --create \
+  --x509-default-dur 8760h \
+  --x509-max-dur 87600h
+```
+*(Если конфигурация CA расположена не в `~/.step/config/ca.json`, добавьте флаг `--ca-config /etc/step-ca/config/ca.json`)*.
+
+Утилита `step` запросит пароль для шифрования приватного ключа создаваемого JWK-провизионера.
+
+2. Если провизионер с таким именем уже существует, обновите допустимые лимиты длительности сертификатов:
+
+```bash
+step ca provisioner update admin \
+  --x509-default-dur 8760h \
+  --x509-max-dur 87600h \
+  --ca-config /etc/step-ca/config/ca.json
+```
+
+3. Перезапустите сервис `step-ca`, чтобы применить изменения конфигурации:
+
+```bash
+sudo systemctl restart step-ca
+```
+
+4. В веб-интерфейсе Step-CA UI перейдите в **Админ-панель -> Настройки CA** (`/admin/ca`):
+- Укажите URL внешнего CA (например, `https://192.168.1.50:9443` или `https://ca.internal:443`).
+- Укажите имя провизионера (`admin`) и заданный для него пароль.
+- Загрузите `root_ca.crt` и `intermediate_ca.crt` (лежат в каталоге `certs/` вашего step-ca) либо смонтируйте каталог через `CA_HOST_PATH`.
+- Нажмите **Сохранить настройки**, затем **Проверить связь с CA**.
 </details>
 
 <details>

@@ -25,16 +25,41 @@ var (
 )
 
 type Handler struct {
-	db    *sql.DB
-	cfg   *config.Config
-	store *sessions.CookieStore
-	tmpls map[string]*template.Template
+	db       *sql.DB
+	cfg      *config.Config
+	store    *sessions.CookieStore
+	tmpls    map[string]*template.Template
+	resolver *CAResolver
 }
 
 func New(db *sql.DB, cfg *config.Config, store *sessions.CookieStore) *Handler {
 	h := &Handler{db: db, cfg: cfg, store: store, tmpls: make(map[string]*template.Template)}
+	res, err := NewCAResolver(h)
+	if err != nil {
+		log.Printf("[handler] warning initializing CAResolver: %v", err)
+	}
+	h.resolver = res
 	h.loadTemplates()
 	return h
+}
+
+func (h *Handler) CA() models.CARuntime {
+	if h.resolver == nil {
+		mode := h.cfg.CAMode
+		if mode == "" {
+			mode = "bundled"
+		}
+		return models.CARuntime{
+			Mode:             mode,
+			URL:              h.cfg.CAURL,
+			RootCert:         h.cfg.RootCert,
+			IntermediateCert: h.intermediateCertPath(),
+			Provisioner:      h.cfg.Provisioner,
+			PasswordFile:     h.cfg.PasswordFile,
+			Configured:       true,
+		}
+	}
+	return h.resolver.Runtime()
 }
 
 func (h *Handler) loadTemplates() {
@@ -64,6 +89,7 @@ func (h *Handler) loadTemplates() {
 		"admin_integrity",
 		"admin_backup",
 		"admin_notifications",
+		"admin_ca",
 		"profile_2fa",
 	}
 	for _, page := range pages {
@@ -237,6 +263,7 @@ func (h *Handler) base(w http.ResponseWriter, r *http.Request, activePage string
 		"Msgs":       h.popFlash(w, r),
 		"ActivePage": activePage,
 		"CSRFToken":  h.csrf(w, r),
+		"CARuntime":  h.CA(),
 	}
 }
 

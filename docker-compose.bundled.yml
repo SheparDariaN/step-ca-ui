@@ -1,0 +1,46 @@
+services:
+  # ─── Step-CA (bundled) ─────────────────────────────────────────────────────
+  step-ca:
+    image: "${STEP_CA_IMAGE:-smallstep/step-ca:0.30.2}"
+    container_name: step-ca
+    privileged: true
+    restart: unless-stopped
+    ports:
+      - "9443:9443"
+    volumes:
+      - step-ca-data:/home/step
+      - ./step-ca-bootstrap.sh:/usr/local/bin/step-ca-bootstrap.sh:ro
+    environment:
+      TZ: "${TZ:-UTC}"
+      DOCKER_STEPCA_INIT_NAME:             "Home CA"
+      DOCKER_STEPCA_INIT_DNS_NAMES:        "step-ca,${HOST_IP:-127.0.0.1}"
+      DOCKER_STEPCA_INIT_ADDRESS:          ":9443"
+      DOCKER_STEPCA_INIT_PROVISIONER_NAME: "${PROVISIONER:-admin}"
+      DOCKER_STEPCA_INIT_PASSWORD:         "${CA_PASSWORD:-change-me-min-8-chars}"
+      DOCKER_STEPCA_INIT_SSH:              "false"
+      STEPCA_DEFAULT_TLS_CERT_DURATION:    "${STEPCA_DEFAULT_TLS_CERT_DURATION:-8760h}"
+      STEPCA_MAX_TLS_CERT_DURATION:        "${STEPCA_MAX_TLS_CERT_DURATION:-87600h}"
+    command: ["/bin/sh", "/usr/local/bin/step-ca-bootstrap.sh", "/usr/local/bin/step-ca", "--password-file", "/home/step/secrets/password", "/home/step/config/ca.json"]
+    networks:
+      - step-net
+    healthcheck:
+      test: ["CMD", "curl", "-sk", "https://localhost:9443/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ─── Step-CA UI wire to bundled step-ca ────────────────────────────────────
+  step-ui:
+    volumes:
+      - step-ca-data:/home/step:ro
+    environment:
+      CA_MODE:   "bundled"
+      CA_URL:    "https://step-ca:9443"
+      ROOT_CERT: "/home/step/certs/root_ca.crt"
+    depends_on:
+      step-ca:
+        condition: service_healthy
+
+volumes:
+  step-ca-data:

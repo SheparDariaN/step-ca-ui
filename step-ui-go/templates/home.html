@@ -12,9 +12,17 @@
   <div class="home-status {{if .CAOnline}}ok{{else}}danger{{end}}">
     <div class="status-dot"></div>
     <div>
-      <div class="status-label">Центр сертификации</div>
-      <div class="status-value">{{if .CAOnline}}Онлайн{{else}}Недоступен{{end}}</div>
-      <div class="status-sub">Аптайм: {{.Uptime}}</div>
+      <div class="status-label">Центр сертификации ({{.CAMode}})</div>
+      <div class="status-value">
+        {{if .CAOnline}}Онлайн{{else}}Недоступен{{end}}
+      </div>
+      <div class="status-sub">
+        {{if and (eq .CAMode "external") (not .CAConfigured)}}
+          <a href="/admin/ca" style="color:var(--err);text-decoration:underline">Не настроен</a>
+        {{else}}
+          Аптайм: {{.Uptime}}
+        {{end}}
+      </div>
     </div>
   </div>
 </div>
