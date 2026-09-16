@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"crypto/rand"
+	"encoding/base32"
 	"encoding/hex"
 	"fmt"
 	"image/png"
@@ -66,10 +67,19 @@ func (h *Handler) Profile2FAQR(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	cleanSecret := strings.ToUpper(strings.TrimSpace(u.TOTPPendingSecret))
+	secretBytes, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.TrimRight(cleanSecret, "="))
+	if err != nil {
+		secretBytes, err = base32.StdEncoding.DecodeString(cleanSecret)
+	}
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      totpIssuer,
 		AccountName: u.Username,
-		Secret:      []byte(u.TOTPPendingSecret),
+		Secret:      secretBytes,
 	})
 	if err != nil {
 		http.NotFound(w, r)
@@ -116,6 +126,7 @@ func (h *Handler) Profile2FAConfirm(w http.ResponseWriter, r *http.Request) {
 	u.TOTPSecret = u.TOTPPendingSecret
 	u.TOTPPendingSecret = ""
 	_ = appdb.LogAuth(h.db, u.Username, r.RemoteAddr, true, "2FA enabled")
+	h.flash(w, r, "ok", "2FA успешно подключена")
 	data := h.base(w, r, "profile")
 	data["U"] = u
 	data["RecoveryCodes"] = recoveryCodes

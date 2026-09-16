@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pquerna/otp/totp"
@@ -102,8 +103,8 @@ func (h *Handler) loginPost2FA(w http.ResponseWriter, r *http.Request, uid int) 
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
 	}
-	code := r.FormValue("totp_code")
-	recovery := r.FormValue("recovery_code")
+	code := strings.TrimSpace(r.FormValue("totp_code"))
+	recovery := strings.TrimSpace(r.FormValue("recovery_code"))
 	ok := totp.Validate(code, user.TOTPSecret)
 	recoveryUsed := false
 	if !ok && recovery != "" {

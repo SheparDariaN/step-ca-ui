@@ -1,6 +1,14 @@
 package models
 
-import "time"
+import (
+	"encoding/gob"
+	"time"
+)
+
+func init() {
+	gob.Register(FlashMsg{})
+	gob.Register([]FlashMsg{})
+}
 
 type User struct {
 	ID                int

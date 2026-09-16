@@ -22,6 +22,7 @@ import (
 	"step-ui/handlers"
 	"step-ui/le"
 	mw "step-ui/middleware"
+	"step-ui/models"
 	"strings"
 )
 
@@ -116,6 +117,8 @@ func main() {
 	gob.Register(int(0))
 	gob.Register(int64(0))
 	gob.Register("")
+	gob.Register(models.FlashMsg{})
+	gob.Register([]models.FlashMsg{})
 	cfg := config.Load()
 
 	// ─── Database ────────────────────────────────────────────────────────────
