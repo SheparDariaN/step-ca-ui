@@ -137,6 +137,47 @@ func RegisterCAProvisioner(d *sql.DB, name, typ, defDur, maxDur, plaintext, secr
 	return UpsertCAProvisioner(d, name, "JWK", defDur, maxDur, enc, false)
 }
 
+func UpdateCAProvisioner(d *sql.DB, name, defDur, maxDur, plaintext, secretKey, systemName string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("provisioner name is required")
+	}
+	if !provisionerNameRe.MatchString(name) {
+		return fmt.Errorf("invalid provisioner name")
+	}
+	if strings.EqualFold(name, "admin") || (strings.TrimSpace(systemName) != "" && strings.EqualFold(name, systemName)) {
+		return fmt.Errorf("cannot update system provisioner %q via CLI", name)
+	}
+	if !AllowedProvisionerDurations[defDur] || !AllowedProvisionerDurations[maxDur] {
+		return fmt.Errorf("duration must be one of 720h, 4380h, 8760h, 87600h")
+	}
+	if DurationExceedsMax(defDur, maxDur) {
+		return fmt.Errorf("default duration exceeds max duration")
+	}
+	existing, err := GetCAProvisioner(d, name)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return fmt.Errorf("provisioner %q is not registered in UI", name)
+	}
+	if existing.IsSystem {
+		return fmt.Errorf("cannot update system provisioner %q via CLI", name)
+	}
+	if strings.TrimSpace(plaintext) != "" {
+		enc, err := security.EncryptSecret(plaintext, secretKey)
+		if err != nil {
+			return err
+		}
+		_, err = d.Exec(`UPDATE ca_provisioners SET default_duration=$1, max_duration=$2, encrypted_password=$3 WHERE name=$4`,
+			defDur, maxDur, enc, name)
+		return err
+	}
+	_, err = d.Exec(`UPDATE ca_provisioners SET default_duration=$1, max_duration=$2 WHERE name=$3`,
+		defDur, maxDur, name)
+	return err
+}
+
 func EnsureSystemProvisioner(d *sql.DB, name, plaintext, secretKey string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {

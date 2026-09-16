@@ -15,11 +15,13 @@ import (
 
 func runProvisionerCLI(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: step-ui provisioner-register|provisioner-list")
+		return fmt.Errorf("usage: step-ui provisioner-register|provisioner-update|provisioner-list")
 	}
 	switch args[0] {
 	case "provisioner-register":
 		return runProvisionerRegister(args[1:])
+	case "provisioner-update":
+		return runProvisionerUpdate(args[1:])
 	case "provisioner-list":
 		return runProvisionerList()
 	default:
@@ -57,6 +59,39 @@ func runProvisionerRegister(args []string) error {
 		return err
 	}
 	fmt.Printf("registered provisioner %s (JWK default=%s max=%s)\n", *name, *defDur, *maxDur)
+	return nil
+}
+
+func runProvisionerUpdate(args []string) error {
+	fs := flag.NewFlagSet("provisioner-update", flag.ContinueOnError)
+	name := fs.String("name", "", "provisioner name")
+	defDur := fs.String("default-dur", "8760h", "default TLS duration")
+	maxDur := fs.String("max-dur", "87600h", "max TLS duration")
+	pwFile := fs.String("password-file", "", "optional password file or - for stdin (leave empty to keep current password)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg := config.Load()
+	conn, err := appdb.Connect(cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if err := appdb.InitSchema(conn); err != nil {
+		return err
+	}
+	var password string
+	if *pwFile != "" {
+		var err error
+		password, err = readCLIPassword(*pwFile)
+		if err != nil {
+			return err
+		}
+	}
+	if err := appdb.UpdateCAProvisioner(conn, *name, *defDur, *maxDur, password, cfg.SecretKey, cfg.Provisioner); err != nil {
+		return err
+	}
+	fmt.Printf("updated provisioner %s (JWK default=%s max=%s)\n", *name, *defDur, *maxDur)
 	return nil
 }
 

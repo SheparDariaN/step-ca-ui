@@ -218,22 +218,34 @@ Backups include PostgreSQL, `step-ca-data`, Step-CA UI data/certs/uploads and
 </details>
 
 <details>
-<summary><b>How do I add extra JWK provisioners (web, mTLS, client) and issue from the UI?</b></summary>
+<summary><b>How do I add and configure provisioners (web, mTLS, client, acme, scep, sshpop, custom)?</b></summary>
 
-Do not put the UI `admin` JWK password on service hosts. Create class provisioners on the Docker host:
+Do not put the UI `admin` JWK password on service hosts. Create provisioners using the CLI on the Docker host:
 
 ```bash
 sudo ./provisioner.sh --mode create --playbook web --lang en
 ```
 
-Recipes live in `playbooks/provisioners/` (`web`, `mtls`, `client`, `custom`). The CLI asks for name, default/max duration (`720h` / `4380h` / `8760h` / `87600h`), and a JWK password (generated or entered). `--mode create` writes the JWK into `ca.json` (bundled container or same-host native CA via `CA_HOST_PATH`, default `/etc/step-ca`), reloads step-ca, and registers the encrypted password in PostgreSQL. `register-only` is for a JWK that already exists on the CA (including a remote CA).
+Recipes live in `playbooks/provisioners/`:
+- `web` — JWK for web servers/proxies with optional **SAN domain restrictions** (e.g., only `*.corp.local`);
+- `mtls` — JWK for service-to-service authentication (server/client);
+- `client` — JWK for client identities (VPN, workstations);
+- `acme` — Built-in ACME server for automation with Certbot, Caddy, Traefik (DNS-01, HTTP-01, TLS-ALPN-01);
+- `scep` — SCEP protocol for managed network hardware (switches, routers, Wi-Fi APs);
+- `sshpop` — Renewal and rekeying of host SSH certificates (SSHPOP);
+- `custom` — Custom interactive setup for any type (JWK/ACME/SCEP/SSHPOP).
 
-If the JWK already exists on the CA:
+For JWK, the CLI asks for name, default/max duration (`720h` / `4380h` / `8760h` / `87600h`), SAN domain restrictions, and a JWK password (generated or entered). `--mode create` writes configuration into `ca.json` (bundled container or same-host native CA via `CA_HOST_PATH`, default `/etc/step-ca`), reloads step-ca (SIGHUP), and registers the password in PostgreSQL for web issuance. ACME, SCEP, and SSHPOP provisioners operate directly over their respective protocols without storing passwords in the UI DB. `register-only` is for an existing JWK that needs to be registered in the UI.
+
+If the provisioner already exists on the CA:
 
 ```bash
+sudo ./provisioner.sh --mode update --playbook web --lang en
 sudo ./provisioner.sh --mode register-only --playbook web --lang en
 sudo ./provisioner.sh --mode list --lang en
 ```
+
+`--mode update` modifies existing provisioner settings (durations, SAN restrictions, ACME challenges, SCEP challenge): configuration is updated in `ca.json` via `step ca provisioner update`, the CA is reloaded gracefully (SIGHUP), and duration limits are updated in the UI database. When updating JWK provisioners, the existing private key and password are preserved by default.
 
 Then on **Issue certificate** choose the provisioner. UI templates (`server` / `internal` / …) only set form defaults; they do not switch the CA provisioner. Duration cannot exceed that JWK's max. The system provisioner (`admin`) cannot be overwritten via this CLI.
 

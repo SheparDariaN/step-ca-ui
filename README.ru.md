@@ -219,24 +219,36 @@ sudo ./install.sh --mode backup --lang ru
 </details>
 
 <details>
-<summary><b>Как добавить дополнительные JWK-провизионеры (web, mTLS, client) и выпускать из UI?</b></summary>
+<summary><b>Как добавить и настроить провизионеры (web, mTLS, client, acme, scep, sshpop, custom)?</b></summary>
 
-Не кладите пароль UI-провизионера `admin` на сервисные хосты. Классы создаются на Docker-хосте:
+Не кладите пароль UI-провизионера `admin` на сервисные хосты. Провизионеры создаются через интерактивный скрипт на Docker-хосте:
 
 ```bash
 sudo ./provisioner.sh --mode create --playbook web --lang ru
 ```
 
-Рецепты лежат в `playbooks/provisioners/` (`web`, `mtls`, `client`, `custom`). CLI спрашивает имя, default/max срок (`720h` / `4380h` / `8760h` / `87600h`) и пароль JWK (сгенерировать или ввести). `--mode create` пишет JWK в `ca.json` (bundled-контейнер или нативный CA на том же хосте через `CA_HOST_PATH`, по умолчанию `/etc/step-ca`), перечитывает step-ca и регистрирует пароль в PostgreSQL. `register-only` — если JWK уже есть на CA (в том числе на удалённом).
+Рецепты лежат в `playbooks/provisioners/`:
+- `web` — JWK для веб-серверов/прокси с опциональным **ограничением разрешенных доменов SAN** (например, только `*.corp.local`);
+- `mtls` — JWK для межсервисной аутентификации (сервер/клиент);
+- `client` — JWK для клиентских идентичностей (VPN, рабочие станции);
+- `acme` — встроенный ACME-сервер для автоматизации через Certbot, Caddy, Traefik (DNS-01, HTTP-01, TLS-ALPN-01);
+- `scep` — протокол SCEP для управляемого сетевого оборудования (коммутаторы, маршрутизаторы, Wi-Fi AP);
+- `sshpop` — продление и ротация ключей хостовых SSH-сертификатов (SSHPOP);
+- `custom` — ручная настройка любого типа (JWK/ACME/SCEP/SSHPOP).
+
+Для JWK CLI спрашивает имя, default/max срок (`720h` / `4380h` / `8760h` / `87600h`), домены SAN и пароль (сгенерировать или ввести). `--mode create` пишет конфигурацию в `ca.json` (bundled-контейнер или нативный CA через `CA_HOST_PATH`, по умолчанию `/etc/step-ca`), перечитывает step-ca (SIGHUP) и регистрирует JWK-пароль в PostgreSQL для веб-выпуска. Провизионеры протоколов ACME/SCEP/SSHPOP работают напрямую без хранения пароля в UI. `register-only` — если существующий JWK нужно зарегистрировать в UI.
 
 Если JWK уже есть на CA:
 
 ```bash
+sudo ./provisioner.sh --mode update --playbook web --lang ru
 sudo ./provisioner.sh --mode register-only --playbook web --lang ru
 sudo ./provisioner.sh --mode list --lang ru
 ```
 
-На странице **Выпустить сертификат** выберите провизионер. Шаблоны UI (`server` / `internal` / …) задают только дефолты формы и не переключают провизионер CA. Срок выпуска не может быть больше max этого JWK. Системный провизионер (`admin`) через этот CLI перезаписать нельзя.
+Режим `--mode update` позволяет обновить параметры существующего провизионера (сроки, SAN-политику, ACME-челленджи, SCEP challenge): конфигурация обновляется в `ca.json` через `step ca provisioner update`, CA перезагружается без простоя (SIGHUP), а новые сроки синхронизируются в базе UI. При обновлении JWK ключ и пароль по умолчанию сохраняются без изменений.
+
+На странице **Выпустить сертификат** выберите нужный JWK-провизионер. Шаблоны UI (`server` / `internal` / …) задают только дефолты формы и не переключают провизионер CA. Срок выпуска не может быть больше max этого JWK. Системный провизионер (`admin`) через этот CLI перезаписать нельзя.
 
 </details>
 

@@ -55,3 +55,19 @@ func TestProvisionerNameValidation(t *testing.T) {
 		t.Fatal("overlong name must fail")
 	}
 }
+
+func TestUpdateCAProvisionerValidation(t *testing.T) {
+	t.Parallel()
+	if err := UpdateCAProvisioner(nil, "", "720h", "4380h", "", "", "admin"); err == nil {
+		t.Fatal("expected error on empty provisioner name")
+	}
+	if err := UpdateCAProvisioner(nil, "admin", "720h", "4380h", "", "", "admin"); err == nil {
+		t.Fatal("expected error on system provisioner name admin")
+	}
+	if err := UpdateCAProvisioner(nil, "web", "100h", "4380h", "", "", "admin"); err == nil {
+		t.Fatal("expected error on disallowed duration")
+	}
+	if err := UpdateCAProvisioner(nil, "web", "87600h", "720h", "", "", "admin"); err == nil {
+		t.Fatal("expected error when default duration exceeds max duration")
+	}
+}

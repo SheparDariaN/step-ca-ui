@@ -102,7 +102,7 @@ func init() {
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "provisioner-register", "provisioner-list":
+		case "provisioner-register", "provisioner-update", "provisioner-list":
 			if err := runProvisionerCLI(os.Args[1:]); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
