@@ -1,11 +1,11 @@
 {{define "content"}}
 <div class="admin-page-header">
   <h1 class="admin-page-title">Уведомления</h1>
-  <p class="admin-page-subtitle">Webhook для критичных событий CA, ошибок выпуска и истекающих сертификатов</p>
+  <p class="admin-page-subtitle">Webhook, email и Telegram для критичных событий CA, ошибок выпуска и истекающих сертификатов</p>
 </div>
 
 {{range .Msgs}}
-  <div class="alert {{if eq .Type "ok"}}alert-ok{{else}}alert-err{{end}}">{{.Text}}</div>
+  <div class="alert {{if eq .Type "ok"}}alert-ok{{else if eq .Type "warn"}}alert-warn{{else}}alert-err{{end}}">{{.Text}}</div>
 {{end}}
 
 <div class="card">
@@ -53,9 +53,9 @@
 </div>
 
 <div class="card">
-  <div class="card-header"><strong>SMTP</strong></div>
+  <div class="card-header"><strong>SMTP / Email</strong></div>
   <div class="card-body">
-    <p class="muted" style="margin-top:0">Используется для восстановления пароля. Пароль SMTP не выводится обратно в форму.</p>
+    <p class="muted" style="margin-top:0">Используется для восстановления пароля и, если заданы получатели, для отправки алертов. Пароль SMTP не выводится обратно в форму.</p>
     <form method="POST" action="/admin/notifications" class="form-grid">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       <input type="hidden" name="webhook_enabled" value="{{if .Settings.WebhookEnabled}}on{{end}}">
@@ -106,8 +106,49 @@
         <input type="email" name="smtp_from" value="{{.Settings.SMTPFrom}}" placeholder="step-ca-ui@example.com" autocomplete="off">
       </label>
 
+      <label>
+        <span>Получатели алертов</span>
+        <input type="text" name="notify_email_to" value="{{.Settings.NotifyEmailTo}}" placeholder="ops@example.com, admin@example.com" autocomplete="off">
+        <span class="muted">Через запятую. Пусто — SMTP используется только для восстановления пароля.</span>
+      </label>
+
       <div class="form-actions">
         <button class="btn primary" type="submit">Сохранить SMTP</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><strong>Telegram</strong></div>
+  <div class="card-body">
+    <p class="muted" style="margin-top:0">Бот создаётся через @BotFather. Token не выводится обратно в форму.</p>
+    <form method="POST" action="/admin/notifications" class="form-grid">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <input type="hidden" name="webhook_enabled" value="{{if .Settings.WebhookEnabled}}on{{end}}">
+      <input type="hidden" name="webhook_url" value="{{.Settings.WebhookURL}}">
+      <input type="hidden" name="notify_expiry" value="{{if .Settings.NotifyExpiry}}on{{end}}">
+      <input type="hidden" name="expiry_days" value="{{.Settings.ExpiryDays}}">
+      <input type="hidden" name="notify_failures" value="{{if .Settings.NotifyFailures}}on{{end}}">
+      <input type="hidden" name="notify_auth_burst" value="{{if .Settings.NotifyAuthBurst}}on{{end}}">
+
+      <label class="check-row">
+        <input type="checkbox" name="telegram_enabled" {{if .Settings.TelegramEnabled}}checked{{end}}>
+        <span>Включить отправку в Telegram</span>
+      </label>
+
+      <label>
+        <span>Bot token</span>
+        <input type="password" name="telegram_bot_token" placeholder="оставьте пустым, чтобы не менять" autocomplete="new-password">
+      </label>
+
+      <label>
+        <span>Chat ID</span>
+        <input type="text" name="telegram_chat_id" value="{{.Settings.TelegramChatID}}" placeholder="-1001234567890" autocomplete="off">
+      </label>
+
+      <div class="form-actions">
+        <button class="btn primary" type="submit">Сохранить Telegram</button>
       </div>
     </form>
   </div>
@@ -118,7 +159,7 @@
   <div class="card-body">
     <form method="POST" action="/admin/notifications/test">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-      <button class="btn" type="submit">Отправить test webhook</button>
+      <button class="btn" type="submit">Отправить тест во все включённые каналы</button>
     </form>
   </div>
 </div>
@@ -129,13 +170,14 @@
     <div class="tbl-wrap">
       <table class="tbl">
         <thead>
-          <tr><th>Время</th><th>Событие</th><th>Статус</th><th>Сообщение</th></tr>
+          <tr><th>Время</th><th>Событие</th><th>Канал</th><th>Статус</th><th>Сообщение</th></tr>
         </thead>
         <tbody>
           {{range .Logs}}
           <tr>
             <td>{{fmtLog .CreatedAt}}</td>
             <td><code>{{.EventType}}</code></td>
+            <td><span class="badge gray">{{.Channel}}</span></td>
             <td>{{if .Success}}<span class="badge ok">OK</span>{{else}}<span class="badge danger">FAIL</span>{{end}}</td>
             <td>
               <strong>{{.Title}}</strong><br>
@@ -144,7 +186,7 @@
             </td>
           </tr>
           {{else}}
-          <tr><td colspan="4" class="muted">Событий пока нет</td></tr>
+          <tr><td colspan="5" class="muted">Событий пока нет</td></tr>
           {{end}}
         </tbody>
       </table>

@@ -188,7 +188,7 @@
   </div>
   {{end}}
   {{range .Msgs}}
-  <div class="alert {{if eq .Type "ok"}}alert-ok{{else}}alert-err{{end}}">{{.Text}}</div>
+  <div class="alert {{if eq .Type "ok"}}alert-ok{{else if eq .Type "warn"}}alert-warn{{else}}alert-err{{end}}">{{.Text}}</div>
   {{end}}
   {{block "content" .}}{{end}}
 </main>

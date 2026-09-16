@@ -28,7 +28,7 @@ func InitNotificationSchema(d *sql.DB) error {
 
 	CREATE TABLE IF NOT EXISTS notification_log (
 		id         SERIAL PRIMARY KEY,
-		event_key  TEXT UNIQUE,
+		event_key  TEXT,
 		event_type VARCHAR(80),
 		severity   VARCHAR(20),
 		title      TEXT,
@@ -52,6 +52,16 @@ func InitNotificationSchema(d *sql.DB) error {
 		`ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS smtp_username TEXT DEFAULT ''`,
 		`ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS smtp_password TEXT DEFAULT ''`,
 		`ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS smtp_from TEXT DEFAULT ''`,
+		`ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS notify_email_to TEXT DEFAULT ''`,
+		`ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS telegram_enabled BOOLEAN DEFAULT FALSE`,
+		`ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS telegram_bot_token TEXT DEFAULT ''`,
+		`ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS telegram_chat_id TEXT DEFAULT ''`,
+		`ALTER TABLE notification_log ADD COLUMN IF NOT EXISTS channel VARCHAR(20) DEFAULT 'webhook'`,
+		// Дедупликация теперь на уровне (event_key, channel): одно событие
+		// может уходить в несколько каналов.
+		`ALTER TABLE notification_log DROP CONSTRAINT IF EXISTS notification_log_event_key_key`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_log_event_channel
+			ON notification_log(event_key, channel) WHERE event_key IS NOT NULL`,
 	} {
 		if _, err := d.Exec(stmt); err != nil {
 			return err
@@ -66,12 +76,15 @@ func GetNotificationSettings(d *sql.DB) (*models.NotificationSettings, error) {
 		COALESCE(expiry_days,30),notify_failures,notify_auth_burst,
 		COALESCE(smtp_enabled,false),COALESCE(smtp_host,''),COALESCE(smtp_port,587),
 		COALESCE(smtp_security,'starttls'),COALESCE(smtp_username,''),COALESCE(smtp_password,''),
-		COALESCE(smtp_from,''),updated_at
+		COALESCE(smtp_from,''),COALESCE(notify_email_to,''),
+		COALESCE(telegram_enabled,false),COALESCE(telegram_bot_token,''),COALESCE(telegram_chat_id,''),
+		updated_at
 		FROM notification_settings WHERE id=1`).
 		Scan(&s.ID, &s.WebhookEnabled, &s.WebhookURL, &s.NotifyExpiry,
 			&s.ExpiryDays, &s.NotifyFailures, &s.NotifyAuthBurst,
 			&s.SMTPEnabled, &s.SMTPHost, &s.SMTPPort, &s.SMTPSecurity,
-			&s.SMTPUsername, &s.SMTPPassword, &s.SMTPFrom, &s.UpdatedAt)
+			&s.SMTPUsername, &s.SMTPPassword, &s.SMTPFrom, &s.NotifyEmailTo,
+			&s.TelegramEnabled, &s.TelegramBotToken, &s.TelegramChatID, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return &models.NotificationSettings{
 			ID:              1,
@@ -98,8 +111,9 @@ func GetNotificationSettings(d *sql.DB) (*models.NotificationSettings, error) {
 func SaveNotificationSettings(d *sql.DB, s *models.NotificationSettings) error {
 	_, err := d.Exec(`INSERT INTO notification_settings
 		(id,webhook_enabled,webhook_url,notify_expiry,expiry_days,notify_failures,notify_auth_burst,
-		 smtp_enabled,smtp_host,smtp_port,smtp_security,smtp_username,smtp_password,smtp_from,updated_at)
-		VALUES (1,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW())
+		 smtp_enabled,smtp_host,smtp_port,smtp_security,smtp_username,smtp_password,smtp_from,
+		 notify_email_to,telegram_enabled,telegram_bot_token,telegram_chat_id,updated_at)
+		VALUES (1,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW())
 		ON CONFLICT (id) DO UPDATE SET
 			webhook_enabled=$1,
 			webhook_url=$2,
@@ -114,33 +128,44 @@ func SaveNotificationSettings(d *sql.DB, s *models.NotificationSettings) error {
 			smtp_username=$11,
 			smtp_password=$12,
 			smtp_from=$13,
+			notify_email_to=$14,
+			telegram_enabled=$15,
+			telegram_bot_token=$16,
+			telegram_chat_id=$17,
 			updated_at=NOW()`,
 		s.WebhookEnabled, s.WebhookURL, s.NotifyExpiry, s.ExpiryDays, s.NotifyFailures, s.NotifyAuthBurst,
-		s.SMTPEnabled, s.SMTPHost, s.SMTPPort, s.SMTPSecurity, s.SMTPUsername, s.SMTPPassword, s.SMTPFrom)
+		s.SMTPEnabled, s.SMTPHost, s.SMTPPort, s.SMTPSecurity, s.SMTPUsername, s.SMTPPassword, s.SMTPFrom,
+		s.NotifyEmailTo, s.TelegramEnabled, s.TelegramBotToken, s.TelegramChatID)
 	return err
 }
 
 func AddNotificationLog(d *sql.DB, l *models.NotificationLog) error {
+	channel := l.Channel
+	if channel == "" {
+		channel = "webhook"
+	}
 	_, err := d.Exec(`INSERT INTO notification_log
-		(event_key,event_type,severity,title,message,success,error)
-		VALUES (NULLIF($1,''),$2,$3,$4,$5,$6,$7)
-		ON CONFLICT (event_key) DO NOTHING`,
-		l.EventKey, l.EventType, l.Severity, l.Title, l.Message, l.Success, l.Error)
+		(event_key,event_type,channel,severity,title,message,success,error)
+		VALUES (NULLIF($1,''),$2,$3,$4,$5,$6,$7,$8)
+		ON CONFLICT DO NOTHING`,
+		l.EventKey, l.EventType, channel, l.Severity, l.Title, l.Message, l.Success, l.Error)
 	return err
 }
 
-func NotificationEventExists(d *sql.DB, eventKey string) bool {
+// NotificationEventExists проверяет, было ли событие уже доставлено в канал.
+func NotificationEventExists(d *sql.DB, eventKey, channel string) bool {
 	if eventKey == "" {
 		return false
 	}
 	var exists bool
-	_ = d.QueryRow(`SELECT EXISTS(SELECT 1 FROM notification_log WHERE event_key=$1)`, eventKey).Scan(&exists)
+	_ = d.QueryRow(`SELECT EXISTS(SELECT 1 FROM notification_log WHERE event_key=$1 AND COALESCE(channel,'webhook')=$2)`,
+		eventKey, channel).Scan(&exists)
 	return exists
 }
 
 func GetNotificationLogs(d *sql.DB, limit int) ([]*models.NotificationLog, error) {
-	rows, err := d.Query(`SELECT id,COALESCE(event_key,''),COALESCE(event_type,''),COALESCE(severity,''),
-		COALESCE(title,''),COALESCE(message,''),success,COALESCE(error,''),created_at
+	rows, err := d.Query(`SELECT id,COALESCE(event_key,''),COALESCE(event_type,''),COALESCE(channel,'webhook'),
+		COALESCE(severity,''),COALESCE(title,''),COALESCE(message,''),success,COALESCE(error,''),created_at
 		FROM notification_log ORDER BY created_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -149,7 +174,7 @@ func GetNotificationLogs(d *sql.DB, limit int) ([]*models.NotificationLog, error
 	var logs []*models.NotificationLog
 	for rows.Next() {
 		l := &models.NotificationLog{}
-		if err := rows.Scan(&l.ID, &l.EventKey, &l.EventType, &l.Severity,
+		if err := rows.Scan(&l.ID, &l.EventKey, &l.EventType, &l.Channel, &l.Severity,
 			&l.Title, &l.Message, &l.Success, &l.Error, &l.CreatedAt); err == nil {
 			logs = append(logs, l)
 		}

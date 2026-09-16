@@ -143,6 +143,9 @@ func InitSchema(d *sql.DB) error {
 	if err := InitCAProvisionerSchema(d); err != nil {
 		return err
 	}
+	if err := InitSecuritySettingsSchema(d); err != nil {
+		return err
+	}
 	return nil
 }
 

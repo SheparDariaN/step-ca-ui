@@ -3,6 +3,37 @@
   <div><h1>Журнал безопасности</h1></div>
 </div>
 
+{{range .Msgs}}
+  <div class="alert {{if eq .Type "ok"}}alert-ok{{else if eq .Type "warn"}}alert-warn{{else}}alert-err{{end}}">{{.Text}}</div>
+{{end}}
+
+<div class="card" style="margin-bottom:16px">
+  <div class="card-header"><strong>Политика обязательного 2FA</strong></div>
+  <div class="card-body">
+    <form method="POST" action="/admin/security/policy" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <div style="min-width:260px">
+        <label>Минимальная роль, для которой TOTP обязателен</label>
+        <select name="force_2fa_role">
+          <option value=""        {{if eq .Force2FARole ""}}selected{{end}}>Выключено</option>
+          <option value="admin"   {{if eq .Force2FARole "admin"}}selected{{end}}>Только admin</option>
+          <option value="manager" {{if eq .Force2FARole "manager"}}selected{{end}}>manager и admin</option>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-sm">Сохранить политику</button>
+      <span style="color:var(--muted);font-size:11px;max-width:420px">
+        Пользователи без TOTP будут перенаправлены на страницу настройки 2FA до включения.
+      </span>
+    </form>
+    {{if .Pending2FAUsers}}
+    <div class="alert alert-warn" style="margin-top:12px">
+      <strong>Не выполнили политику:</strong>
+      {{range $i, $u := .Pending2FAUsers}}{{if $i}}, {{end}}{{$u}}{{end}}
+    </div>
+    {{end}}
+  </div>
+</div>
+
 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">
   <div class="stat-card"><div class="stat-label">Всего записей</div><div class="stat-value">{{.Total}}</div></div>
   <div class="stat-card"><div class="stat-label">Успешных событий</div><div class="stat-value ok">{{.TotalOK}}</div></div>

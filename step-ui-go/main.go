@@ -158,7 +158,7 @@ func main() {
 	h := handlers.New(conn, cfg, store)
 
 	// ─── Let's Encrypt auto-renewer ──────────────────────────────────────────
-	le.StartRenewer(conn)
+	le.StartRenewer(conn, h.NotifyAsync)
 	h.StartNotificationWorker()
 
 	// ─── Router ──────────────────────────────────────────────────────────────
@@ -177,10 +177,13 @@ func main() {
 	r.Get("/reset-password", h.ResetPasswordGet)
 	r.Post("/reset-password", h.ResetPasswordPost)
 	r.Get("/logout", h.Logout)
+	// Prometheus scrape endpoint: включается METRICS_TOKEN, авторизация bearer-токеном.
+	r.Get("/metrics", h.Metrics)
 
 	// Авторизованные маршруты
 	r.Group(func(r chi.Router) {
 		r.Use(mw.RequireLogin(store))
+		r.Use(h.Enforce2FAPolicy)
 
 		r.Get("/", h.Home)
 		r.Get("/dashboard", h.Dashboard)
@@ -205,17 +208,19 @@ func main() {
 			r.Use(mw.RequireRole("manager", store))
 			r.Get("/issue", h.IssueGet)
 			r.Post("/issue", h.IssuePost)
-			r.Get("/renew/{id}", h.Renew)
+			r.Post("/renew/{id}", h.Renew)
 			r.Get("/import", h.ImportGet)
 			r.Post("/import", h.ImportPost)
 			r.Get("/download/cert/{id}", h.DownloadCert)
 			r.Get("/download/key/{id}", h.DownloadKey)
+			r.Get("/download/bundle/{id}", h.DownloadBundle)
+			r.Post("/download/bundle/{id}/pkcs12", h.DownloadBundlePKCS12)
 		})
 
 		// Отзыв (admin)
 		r.Group(func(r chi.Router) {
 			r.Use(mw.RequireRole("admin", store))
-			r.Get("/revoke/{id}", h.Revoke)
+			r.Post("/revoke/{id}", h.Revoke)
 		})
 
 		// Управление пользователями (admin)
@@ -230,6 +235,7 @@ func main() {
 			r.Post("/admin/users-temp", h.AdminUsersTempPost)
 			r.Get("/admin/activity", h.AdminActivityGet)
 			r.Get("/admin/security", h.SecurityLog)
+			r.Post("/admin/security/policy", h.SecurityPolicyPost)
 			r.Get("/admin/console", h.AdminConsoleGet)
 			r.Post("/admin/console", h.AdminConsolePost)
 			r.Get("/admin/about", h.AdminAboutGet)

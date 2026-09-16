@@ -23,13 +23,25 @@ type IssuePolicy struct {
 	Template string
 	Duration string
 	KeyType  string
+	// Purpose передаётся в step-ca как template data переменная x509Purpose
+	// и определяет extKeyUsage выпущенного сертификата.
+	Purpose string
 }
 
+// Допустимые значения x509Purpose. Шаблон провизионера (см. provisioner.sh)
+// разворачивает их в extKeyUsage: server -> serverAuth, client -> clientAuth,
+// internal -> serverAuth + clientAuth.
+const (
+	purposeServer   = "server"
+	purposeClient   = "client"
+	purposeInternal = "internal"
+)
+
 var issueTemplates = map[string]IssuePolicy{
-	"server":   {Template: "server", Duration: "8760h", KeyType: "EC:P-256"},
-	"internal": {Template: "internal", Duration: "87600h", KeyType: "EC:P-256"},
-	"wildcard": {Template: "wildcard", Duration: "8760h", KeyType: "EC:P-256"},
-	"client":   {Template: "client", Duration: "8760h", KeyType: "EC:P-256"},
+	"server":   {Template: "server", Duration: "8760h", KeyType: "EC:P-256", Purpose: purposeServer},
+	"internal": {Template: "internal", Duration: "87600h", KeyType: "EC:P-256", Purpose: purposeInternal},
+	"wildcard": {Template: "wildcard", Duration: "8760h", KeyType: "EC:P-256", Purpose: purposeServer},
+	"client":   {Template: "client", Duration: "8760h", KeyType: "EC:P-256", Purpose: purposeClient},
 }
 
 var allowedIssueDurations = map[string]bool{
@@ -69,7 +81,7 @@ func durationExceedsMax(requested, maxDur string) bool {
 	return appdb.DurationExceedsMax(requested, maxDur)
 }
 
-func (h *Handler) issueCert(domain, certPath, keyPath, duration, keyType, provisioner, passwordFile string) error {
+func (h *Handler) issueCert(domain, certPath, keyPath, duration, keyType, purpose, provisioner, passwordFile string) error {
 	ca := h.CA()
 	if !ca.Configured {
 		return fmt.Errorf("Step-CA не настроен. Настройте подключение в разделе Админ -> Настройки CA (/admin/ca)")
@@ -80,7 +92,7 @@ func (h *Handler) issueCert(domain, certPath, keyPath, duration, keyType, provis
 	if passwordFile == "" {
 		passwordFile = ca.PasswordFile
 	}
-	args := stepCertificateArgs(ca.URL, ca.RootCert, provisioner, passwordFile, duration, keyType, domain, certPath, keyPath)
+	args := stepCertificateArgs(ca.URL, ca.RootCert, provisioner, passwordFile, duration, keyType, purpose, domain, certPath, keyPath)
 	log.Printf("[step-cli] step %s", strings.Join(args, " "))
 	cmd := exec.Command("step", args...)
 	out, err := cmd.CombinedOutput()
@@ -90,7 +102,7 @@ func (h *Handler) issueCert(domain, certPath, keyPath, duration, keyType, provis
 	return nil
 }
 
-func stepCertificateArgs(caURL, rootCert, provisioner, passwordFile, duration, keyType, domain, certPath, keyPath string) []string {
+func stepCertificateArgs(caURL, rootCert, provisioner, passwordFile, duration, keyType, purpose, domain, certPath, keyPath string) []string {
 	args := []string{
 		"ca", "certificate",
 		"--ca-url", caURL,
@@ -100,6 +112,9 @@ func stepCertificateArgs(caURL, rootCert, provisioner, passwordFile, duration, k
 		"--not-after", duration,
 		"--force",
 	}
+	if purpose != "" {
+		args = append(args, "--set", "x509Purpose="+purpose)
+	}
 	if strings.HasPrefix(keyType, "EC:") {
 		args = append(args, "--kty", "EC", "--curve", strings.TrimPrefix(keyType, "EC:"))
 	} else if strings.HasPrefix(keyType, "RSA:") {
@@ -108,7 +123,7 @@ func stepCertificateArgs(caURL, rootCert, provisioner, passwordFile, duration, k
 	return append(args, domain, certPath, keyPath)
 }
 
-func (h *Handler) issueWithRegisteredProvisioner(domain, certPath, keyPath, duration, keyType, provisionerName string) error {
+func (h *Handler) issueWithRegisteredProvisioner(domain, certPath, keyPath, duration, keyType, purpose, provisionerName string) error {
 	ca := h.CA()
 	if provisionerName == "" {
 		provisionerName = ca.Provisioner
@@ -150,7 +165,33 @@ func (h *Handler) issueWithRegisteredProvisioner(domain, certPath, keyPath, dura
 	} else if !prov.IsSystem && provisionerName != ca.Provisioner {
 		return fmt.Errorf("для провизионера %s не задан пароль", provisionerName)
 	}
-	return h.issueCert(domain, certPath, keyPath, duration, keyType, prov.Name, passwordFile)
+	return h.issueCert(domain, certPath, keyPath, duration, keyType, purpose, prov.Name, passwordFile)
+}
+
+// certPurposeFromFile определяет x509Purpose по extKeyUsage существующего
+// сертификата, чтобы перевыпуск сохранял исходное назначение.
+func certPurposeFromFile(certPath string) string {
+	cert, err := readPEMCert(certPath)
+	if err != nil {
+		return purposeServer
+	}
+	server, client := false, false
+	for _, usage := range cert.ExtKeyUsage {
+		switch usage {
+		case x509.ExtKeyUsageServerAuth:
+			server = true
+		case x509.ExtKeyUsageClientAuth:
+			client = true
+		}
+	}
+	switch {
+	case server && client:
+		return purposeInternal
+	case client:
+		return purposeClient
+	default:
+		return purposeServer
+	}
 }
 
 func (h *Handler) revokeStep(certPath, keyPath string) {

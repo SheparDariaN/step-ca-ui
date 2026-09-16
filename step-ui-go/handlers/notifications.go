@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -58,17 +59,21 @@ func (h *Handler) AdminNotificationsPost(w http.ResponseWriter, r *http.Request)
 		expiryDays = 365
 	}
 	settings := &models.NotificationSettings{
-		WebhookEnabled:  r.FormValue("webhook_enabled") == "on",
-		WebhookURL:      strings.TrimSpace(r.FormValue("webhook_url")),
-		NotifyExpiry:    r.FormValue("notify_expiry") == "on",
-		ExpiryDays:      expiryDays,
-		NotifyFailures:  r.FormValue("notify_failures") == "on",
-		NotifyAuthBurst: r.FormValue("notify_auth_burst") == "on",
-		SMTPEnabled:     r.FormValue("smtp_enabled") == "on",
-		SMTPHost:        strings.TrimSpace(r.FormValue("smtp_host")),
-		SMTPUsername:    strings.TrimSpace(r.FormValue("smtp_username")),
-		SMTPPassword:    strings.TrimSpace(r.FormValue("smtp_password")),
-		SMTPFrom:        strings.TrimSpace(r.FormValue("smtp_from")),
+		WebhookEnabled:   r.FormValue("webhook_enabled") == "on",
+		WebhookURL:       strings.TrimSpace(r.FormValue("webhook_url")),
+		NotifyExpiry:     r.FormValue("notify_expiry") == "on",
+		ExpiryDays:       expiryDays,
+		NotifyFailures:   r.FormValue("notify_failures") == "on",
+		NotifyAuthBurst:  r.FormValue("notify_auth_burst") == "on",
+		SMTPEnabled:      r.FormValue("smtp_enabled") == "on",
+		SMTPHost:         strings.TrimSpace(r.FormValue("smtp_host")),
+		SMTPUsername:     strings.TrimSpace(r.FormValue("smtp_username")),
+		SMTPPassword:     strings.TrimSpace(r.FormValue("smtp_password")),
+		SMTPFrom:         strings.TrimSpace(r.FormValue("smtp_from")),
+		NotifyEmailTo:    strings.TrimSpace(r.FormValue("notify_email_to")),
+		TelegramEnabled:  r.FormValue("telegram_enabled") == "on",
+		TelegramBotToken: strings.TrimSpace(r.FormValue("telegram_bot_token")),
+		TelegramChatID:   strings.TrimSpace(r.FormValue("telegram_chat_id")),
 	}
 	settings.SMTPPort, _ = strconv.Atoi(r.FormValue("smtp_port"))
 	if settings.SMTPPort <= 0 {
@@ -86,9 +91,18 @@ func (h *Handler) AdminNotificationsPost(w http.ResponseWriter, r *http.Request)
 		settings.SMTPUsername = current.SMTPUsername
 		settings.SMTPPassword = current.SMTPPassword
 		settings.SMTPFrom = current.SMTPFrom
+		settings.NotifyEmailTo = current.NotifyEmailTo
 	}
 	if settings.SMTPPassword == "" {
 		settings.SMTPPassword = current.SMTPPassword
+	}
+	if !r.Form.Has("telegram_chat_id") {
+		settings.TelegramEnabled = current.TelegramEnabled
+		settings.TelegramBotToken = current.TelegramBotToken
+		settings.TelegramChatID = current.TelegramChatID
+	}
+	if settings.TelegramBotToken == "" {
+		settings.TelegramBotToken = current.TelegramBotToken
 	}
 	if settings.WebhookEnabled {
 		if _, err := url.ParseRequestURI(settings.WebhookURL); err != nil {
@@ -104,12 +118,19 @@ func (h *Handler) AdminNotificationsPost(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+	if settings.TelegramEnabled {
+		if settings.TelegramBotToken == "" || settings.TelegramChatID == "" {
+			h.flash(w, r, "err", "Для Telegram укажите bot token и chat ID")
+			http.Redirect(w, r, "/admin/notifications", http.StatusSeeOther)
+			return
+		}
+	}
 	if err := appdb.SaveNotificationSettings(h.db, settings); err != nil {
 		h.flash(w, r, "err", "Не удалось сохранить настройки: "+err.Error())
 	} else {
-		h.auditSecurity(r, fmt.Sprintf("notifications.save webhook_enabled=%t smtp_enabled=%t smtp_host=%s smtp_security=%s notify_expiry=%t notify_failures=%t notify_auth_burst=%t expiry_days=%d",
+		h.auditSecurity(r, fmt.Sprintf("notifications.save webhook_enabled=%t smtp_enabled=%t smtp_host=%s smtp_security=%s telegram_enabled=%t notify_expiry=%t notify_failures=%t notify_auth_burst=%t expiry_days=%d",
 			settings.WebhookEnabled, settings.SMTPEnabled, settings.SMTPHost, settings.SMTPSecurity,
-			settings.NotifyExpiry, settings.NotifyFailures, settings.NotifyAuthBurst, settings.ExpiryDays))
+			settings.TelegramEnabled, settings.NotifyExpiry, settings.NotifyFailures, settings.NotifyAuthBurst, settings.ExpiryDays))
 		h.flash(w, r, "ok", "Настройки уведомлений сохранены")
 	}
 	http.Redirect(w, r, "/admin/notifications", http.StatusSeeOther)
@@ -125,22 +146,28 @@ func (h *Handler) AdminNotificationsTest(w http.ResponseWriter, r *http.Request)
 		http.Redirect(w, r, "/admin/notifications", http.StatusSeeOther)
 		return
 	}
-	if !settings.WebhookEnabled || strings.TrimSpace(settings.WebhookURL) == "" {
-		h.flash(w, r, "err", "Сначала включите webhook и укажите URL")
+	channels := enabledChannels(settings)
+	if len(channels) == 0 {
+		h.flash(w, r, "err", "Сначала включите и настройте хотя бы один канал доставки")
 		http.Redirect(w, r, "/admin/notifications", http.StatusSeeOther)
 		return
 	}
-	err = h.sendNotification(r.Context(), "", "system.test", "info", "Step-CA UI test notification", "Тестовая отправка webhook из админ-панели", map[string]string{
+	err = h.sendNotification(r.Context(), "", "system.test", "info", "Step-CA UI test notification", "Тестовая отправка уведомления из админ-панели", map[string]string{
 		"remote_addr": r.RemoteAddr,
 	})
 	if err != nil {
-		h.auditSecurity(r, "notifications.test status=failed")
-		h.flash(w, r, "err", "Webhook test failed: "+err.Error())
+		h.auditSecurity(r, "notifications.test status=failed channels="+strings.Join(channels, ","))
+		h.flash(w, r, "err", "Тестовая отправка не удалась: "+err.Error())
 	} else {
-		h.auditSecurity(r, "notifications.test status=sent")
-		h.flash(w, r, "ok", "Webhook test отправлен")
+		h.auditSecurity(r, "notifications.test status=sent channels="+strings.Join(channels, ","))
+		h.flash(w, r, "ok", "Тест отправлен в каналы: "+strings.Join(channels, ", "))
 	}
 	http.Redirect(w, r, "/admin/notifications", http.StatusSeeOther)
+}
+
+// NotifyAsync — экспортированная обёртка для фоновых воркеров вне пакета.
+func (h *Handler) NotifyAsync(eventKey, eventType, severity, title, message string, meta map[string]string) {
+	h.notifyAsync(eventKey, eventType, severity, title, message, meta)
 }
 
 func (h *Handler) notifyAsync(eventKey, eventType, severity, title, message string, meta map[string]string) {
@@ -153,18 +180,20 @@ func (h *Handler) notifyAsync(eventKey, eventType, severity, title, message stri
 	}()
 }
 
+const (
+	channelWebhook  = "webhook"
+	channelEmail    = "email"
+	channelTelegram = "telegram"
+)
+
+// sendNotification доставляет событие во все включённые каналы. Каждый канал
+// логируется отдельно, дедупликация по event_key тоже работает на канал.
 func (h *Handler) sendNotification(ctx context.Context, eventKey, eventType, severity, title, message string, meta map[string]string) error {
 	settings, err := appdb.GetNotificationSettings(h.db)
 	if err != nil {
 		return err
 	}
-	if !settings.WebhookEnabled || strings.TrimSpace(settings.WebhookURL) == "" {
-		return nil
-	}
 	if !notificationAllowed(settings, eventType) {
-		return nil
-	}
-	if eventKey != "" && appdb.NotificationEventExists(h.db, eventKey) {
 		return nil
 	}
 
@@ -178,11 +207,73 @@ func (h *Handler) sendNotification(ctx context.Context, eventKey, eventType, sev
 		Version:   Version,
 		Meta:      meta,
 	}
+
+	var errs []string
+	for _, channel := range enabledChannels(settings) {
+		if eventKey != "" && appdb.NotificationEventExists(h.db, eventKey, channel) {
+			continue
+		}
+		var sendErr error
+		switch channel {
+		case channelWebhook:
+			sendErr = sendWebhookNotification(ctx, settings, payload)
+		case channelEmail:
+			sendErr = sendEmailNotification(ctx, settings, payload)
+		case channelTelegram:
+			sendErr = sendTelegramNotification(ctx, settings, payload)
+		}
+		logEntry := &models.NotificationLog{
+			EventKey:  eventKey,
+			EventType: eventType,
+			Channel:   channel,
+			Severity:  severity,
+			Title:     title,
+			Message:   message,
+			Success:   sendErr == nil,
+		}
+		if sendErr != nil {
+			logEntry.Error = sendErr.Error()
+			errs = append(errs, channel+": "+sendErr.Error())
+		}
+		_ = appdb.AddNotificationLog(h.db, logEntry)
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func enabledChannels(settings *models.NotificationSettings) []string {
+	var out []string
+	if settings.WebhookEnabled && strings.TrimSpace(settings.WebhookURL) != "" {
+		out = append(out, channelWebhook)
+	}
+	if settings.SMTPEnabled && strings.TrimSpace(settings.SMTPHost) != "" &&
+		strings.TrimSpace(settings.SMTPFrom) != "" && len(emailRecipients(settings)) > 0 {
+		out = append(out, channelEmail)
+	}
+	if settings.TelegramEnabled && strings.TrimSpace(settings.TelegramBotToken) != "" &&
+		strings.TrimSpace(settings.TelegramChatID) != "" {
+		out = append(out, channelTelegram)
+	}
+	return out
+}
+
+func emailRecipients(settings *models.NotificationSettings) []string {
+	var out []string
+	for _, part := range strings.Split(settings.NotifyEmailTo, ",") {
+		if addr := strings.TrimSpace(part); addr != "" {
+			out = append(out, addr)
+		}
+	}
+	return out
+}
+
+func sendWebhookNotification(ctx context.Context, settings *models.NotificationSettings, payload notificationPayload) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, settings.WebhookURL, bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -192,30 +283,89 @@ func (h *Handler) sendNotification(ctx context.Context, eventKey, eventType, sev
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
-	logEntry := &models.NotificationLog{
-		EventKey:  eventKey,
-		EventType: eventType,
-		Severity:  severity,
-		Title:     title,
-		Message:   message,
-	}
 	if err != nil {
-		logEntry.Success = false
-		logEntry.Error = err.Error()
-		_ = appdb.AddNotificationLog(h.db, logEntry)
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		err = fmt.Errorf("webhook returned HTTP %d", resp.StatusCode)
-		logEntry.Success = false
-		logEntry.Error = err.Error()
-		_ = appdb.AddNotificationLog(h.db, logEntry)
+		return fmt.Errorf("webhook returned HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func sendEmailNotification(ctx context.Context, settings *models.NotificationSettings, payload notificationPayload) error {
+	subject := fmt.Sprintf("[Step-CA UI][%s] %s", strings.ToUpper(payload.Severity), payload.Title)
+	var body strings.Builder
+	fmt.Fprintf(&body, "%s\r\n\r\n", payload.Message)
+	fmt.Fprintf(&body, "Событие: %s\r\n", payload.Type)
+	fmt.Fprintf(&body, "Уровень: %s\r\n", payload.Severity)
+	fmt.Fprintf(&body, "Время: %s\r\n", payload.Timestamp.Format(time.RFC3339))
+	fmt.Fprintf(&body, "Источник: %s %s\r\n", payload.Source, payload.Version)
+	for _, key := range sortedMetaKeys(payload.Meta) {
+		fmt.Fprintf(&body, "%s: %s\r\n", key, payload.Meta[key])
+	}
+	return sendSMTPMail(ctx, settings.SMTPHost, settings.SMTPPort, settings.SMTPSecurity,
+		settings.SMTPUsername, settings.SMTPPassword, settings.SMTPFrom,
+		emailRecipients(settings), subject, body.String())
+}
+
+func sendTelegramNotification(ctx context.Context, settings *models.NotificationSettings, payload notificationPayload) error {
+	var text strings.Builder
+	fmt.Fprintf(&text, "%s %s\n%s\n", telegramSeverityIcon(payload.Severity), payload.Title, payload.Message)
+	fmt.Fprintf(&text, "\nСобытие: %s\nВремя: %s\n", payload.Type, payload.Timestamp.Format(time.RFC3339))
+	for _, key := range sortedMetaKeys(payload.Meta) {
+		fmt.Fprintf(&text, "%s: %s\n", key, payload.Meta[key])
+	}
+
+	form := url.Values{}
+	form.Set("chat_id", strings.TrimSpace(settings.TelegramChatID))
+	form.Set("text", text.String())
+	form.Set("disable_web_page_preview", "true")
+
+	endpoint := "https://api.telegram.org/bot" + strings.TrimSpace(settings.TelegramBotToken) + "/sendMessage"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
 		return err
 	}
-	logEntry.Success = true
-	_ = appdb.AddNotificationLog(h.db, logEntry)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 7 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var apiErr struct {
+			Description string `json:"description"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&apiErr)
+		if apiErr.Description != "" {
+			return fmt.Errorf("telegram API: %s", apiErr.Description)
+		}
+		return fmt.Errorf("telegram API returned HTTP %d", resp.StatusCode)
+	}
 	return nil
+}
+
+func telegramSeverityIcon(severity string) string {
+	switch severity {
+	case "error":
+		return "[ERROR]"
+	case "warn":
+		return "[WARN]"
+	default:
+		return "[INFO]"
+	}
+}
+
+func sortedMetaKeys(meta map[string]string) []string {
+	keys := make([]string, 0, len(meta))
+	for k := range meta {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func notificationAllowed(settings *models.NotificationSettings, eventType string) bool {
@@ -247,26 +397,53 @@ func (h *Handler) checkExpiringCertificates(ctx context.Context) {
 	if err != nil || !settings.NotifyExpiry || settings.ExpiryDays <= 0 {
 		return
 	}
+	now := time.Now()
+	limit := now.Add(time.Duration(settings.ExpiryDays) * 24 * time.Hour)
+
 	certs, err := appdb.GetCerts(h.db, "active")
+	if err == nil {
+		for _, c := range certs {
+			if c.ExpiresAt == nil || c.ExpiresAt.Before(now) || c.ExpiresAt.After(limit) {
+				continue
+			}
+			eventKey := fmt.Sprintf("cert-expiry:%d:%s", c.ID, c.ExpiresAt.Format("2006-01-02"))
+			days := int(time.Until(*c.ExpiresAt).Hours() / 24)
+			_ = h.sendNotification(ctx, eventKey, "certificate.expiring", "warn",
+				"Certificate expires soon",
+				fmt.Sprintf("Сертификат %s (%s) истекает через %d дн.", c.Name, c.Domain, days),
+				map[string]string{
+					"id":      strconv.Itoa(c.ID),
+					"name":    c.Name,
+					"domain":  c.Domain,
+					"expires": c.ExpiresAt.Format(time.RFC3339),
+				})
+		}
+	}
+
+	// Let's Encrypt сертификаты живут 90 дней и обновляются отдельным
+	// воркером, поэтому их истечение тоже нужно отслеживать.
+	leCerts, err := appdb.GetLECerts(h.db)
 	if err != nil {
 		return
 	}
-	now := time.Now()
-	limit := now.Add(time.Duration(settings.ExpiryDays) * 24 * time.Hour)
-	for _, c := range certs {
-		if c.ExpiresAt == nil || c.ExpiresAt.Before(now) || c.ExpiresAt.After(limit) {
+	for _, c := range leCerts {
+		if c.Status != "active" || c.ExpiresAt == nil {
 			continue
 		}
-		eventKey := fmt.Sprintf("cert-expiry:%d:%s", c.ID, c.ExpiresAt.Format("2006-01-02"))
+		if c.ExpiresAt.Before(now) || c.ExpiresAt.After(limit) {
+			continue
+		}
+		eventKey := fmt.Sprintf("le-cert-expiry:%d:%s", c.ID, c.ExpiresAt.Format("2006-01-02"))
 		days := int(time.Until(*c.ExpiresAt).Hours() / 24)
 		_ = h.sendNotification(ctx, eventKey, "certificate.expiring", "warn",
-			"Certificate expires soon",
-			fmt.Sprintf("Сертификат %s (%s) истекает через %d дн.", c.Name, c.Domain, days),
+			"Let's Encrypt certificate expires soon",
+			fmt.Sprintf("LE сертификат %s истекает через %d дн. (auto-renew: %t)", c.Domain, days, c.AutoRenew),
 			map[string]string{
-				"id":      strconv.Itoa(c.ID),
-				"name":    c.Name,
-				"domain":  c.Domain,
-				"expires": c.ExpiresAt.Format(time.RFC3339),
+				"id":         strconv.Itoa(c.ID),
+				"domain":     c.Domain,
+				"source":     "lets-encrypt",
+				"auto_renew": strconv.FormatBool(c.AutoRenew),
+				"expires":    c.ExpiresAt.Format(time.RFC3339),
 			})
 	}
 }

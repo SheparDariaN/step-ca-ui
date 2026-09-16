@@ -18,6 +18,7 @@ import (
 	"github.com/go-acme/lego/v4/challenge/http01"
 	"github.com/go-acme/lego/v4/lego"
 	"github.com/go-acme/lego/v4/providers/dns/cloudflare"
+	"github.com/go-acme/lego/v4/providers/dns/route53"
 	"github.com/go-acme/lego/v4/registration"
 )
 
@@ -100,15 +101,31 @@ func IssueCert(cfg LEConfig) (*LEResult, error) {
 		client.Challenge.SetHTTP01Provider(http01.NewProviderServer("", "80"))
 	case "cloudflare":
 		if cfg.CFToken == "" {
-			return nil, fmt.Errorf("Cloudflare API token не задан")
+			return nil, fmt.Errorf("Cloudflare API token не задан. Заполните его в Настройках LE")
 		}
-		os.Setenv("CF_DNS_API_TOKEN", cfg.CFToken)
-		provider := cloudflare.NewDefaultConfig()
-		cp, err := cloudflare.NewDNSProviderConfig(provider)
+		cfConfig := cloudflare.NewDefaultConfig()
+		cfConfig.AuthToken = cfg.CFToken
+		cp, err := cloudflare.NewDNSProviderConfig(cfConfig)
 		if err != nil {
 			return nil, fmt.Errorf("cloudflare provider: %w", err)
 		}
 		client.Challenge.SetDNS01Provider(cp)
+	case "route53":
+		if cfg.R53KeyID == "" || cfg.R53Secret == "" {
+			return nil, fmt.Errorf("AWS Route53: не заданы Access Key ID и Secret Access Key. Заполните их в Настройках LE")
+		}
+		r53Config := route53.NewDefaultConfig()
+		r53Config.AccessKeyID = cfg.R53KeyID
+		r53Config.SecretAccessKey = cfg.R53Secret
+		r53Config.Region = cfg.R53Region
+		if r53Config.Region == "" {
+			r53Config.Region = "us-east-1"
+		}
+		rp, err := route53.NewDNSProviderConfig(r53Config)
+		if err != nil {
+			return nil, fmt.Errorf("route53 provider: %w", err)
+		}
+		client.Challenge.SetDNS01Provider(rp)
 	default:
 		return nil, fmt.Errorf("неизвестный провайдер: %s", cfg.Provider)
 	}

@@ -84,6 +84,13 @@ func (h *Handler) AdminConsolePost(w http.ResponseWriter, r *http.Request) {
 	data := h.adminConsoleData(w, r)
 	data["SelectedCommandID"] = commandID
 
+	if enabled, _ := data["TOTPEnabled"].(bool); !enabled {
+		h.auditSecurity(r, "console.denied reason=totp_required command_id="+commandID)
+		data["ConsoleError"] = "Консоль доступна только с включённой 2FA. Настройте TOTP в профиле."
+		h.render(w, "admin_console", data)
+		return
+	}
+
 	c, ok := h.findAdminConsoleCommand(commandID)
 	if !ok {
 		h.auditSecurity(r, "console.denied command_id="+commandID)

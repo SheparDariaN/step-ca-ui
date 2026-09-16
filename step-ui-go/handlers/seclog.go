@@ -3,8 +3,10 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	appdb "step-ui/db"
+	"step-ui/models"
 )
 
 func (h *Handler) SecurityLog(w http.ResponseWriter, r *http.Request) {
@@ -29,5 +31,58 @@ func (h *Handler) SecurityLog(w http.ResponseWriter, r *http.Request) {
 	data["TotalFail"] = failCount
 	data["CurrentPage"] = page
 	data["TotalPages"] = totalPages
+	data["Force2FARole"] = h.force2FARole()
+	data["Pending2FAUsers"] = h.pending2FAPolicyUsers()
 	h.render(w, "admin_security", data)
+}
+
+// SecurityPolicyPost сохраняет политику обязательного 2FA.
+func (h *Handler) SecurityPolicyPost(w http.ResponseWriter, r *http.Request) {
+	if !h.requireCSRF(w, r, "/admin/security") {
+		return
+	}
+	role := strings.TrimSpace(r.FormValue("force_2fa_role"))
+	if role != "" && role != "admin" && role != "manager" {
+		h.flash(w, r, "err", "Недопустимая роль для политики 2FA")
+		http.Redirect(w, r, "/admin/security", http.StatusSeeOther)
+		return
+	}
+	if err := appdb.SaveSecuritySettings(h.db, &models.SecuritySettings{Force2FARole: role}); err != nil {
+		h.flash(w, r, "err", "Не удалось сохранить политику: "+err.Error())
+		http.Redirect(w, r, "/admin/security", http.StatusSeeOther)
+		return
+	}
+	h.auditSecurity(r, "security.policy.save force_2fa_role="+role)
+	if role == "" {
+		h.flash(w, r, "ok", "Политика обязательного 2FA отключена")
+	} else {
+		h.flash(w, r, "ok", "Политика обязательного 2FA сохранена: "+role+" и выше")
+	}
+	http.Redirect(w, r, "/admin/security", http.StatusSeeOther)
+}
+
+// pending2FAPolicyUsers — активные пользователи, которым политика требует
+// включить TOTP, но у которых он ещё не настроен.
+func (h *Handler) pending2FAPolicyUsers() []string {
+	minRole := h.force2FARole()
+	if minRole == "" {
+		return nil
+	}
+	rows, err := h.db.Query(`SELECT username, role FROM users
+		WHERE is_active = true AND COALESCE(totp_enabled,false) = false ORDER BY username`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var username, role string
+		if err := rows.Scan(&username, &role); err != nil {
+			continue
+		}
+		if roleAtLeast(role, minRole) {
+			out = append(out, username+" ("+role+")")
+		}
+	}
+	return out
 }

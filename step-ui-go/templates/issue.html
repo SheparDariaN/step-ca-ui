@@ -53,19 +53,19 @@
         <div class="template-grid">
           <button type="button" class="template-card active" data-template="server" data-key="EC:P-256" data-duration="8760h" data-placeholder="app.example.com">
             <span class="template-title">Server TLS</span>
-            <span class="template-sub">Обычный HTTPS/service сертификат на 1 год</span>
+            <span class="template-sub">Обычный HTTPS/service сертификат на 1 год · serverAuth</span>
           </button>
           <button type="button" class="template-card" data-template="internal" data-key="EC:P-256" data-duration="87600h" data-placeholder="service.home.local">
             <span class="template-title">Internal service</span>
-            <span class="template-sub">Внутренний сервис, срок до 10 лет</span>
+            <span class="template-sub">Внутренний сервис, срок до 10 лет · serverAuth + clientAuth</span>
           </button>
           <button type="button" class="template-card" data-template="wildcard" data-key="EC:P-256" data-duration="8760h" data-placeholder="*.example.com">
             <span class="template-title">Wildcard</span>
-            <span class="template-sub">Только имена вида *.example.com</span>
+            <span class="template-sub">Только имена вида *.example.com · serverAuth</span>
           </button>
           <button type="button" class="template-card" data-template="client" data-key="EC:P-256" data-duration="8760h" data-placeholder="client-01">
             <span class="template-title">Client identity</span>
-            <span class="template-sub">Идентификатор для mTLS/VPN сценариев</span>
+            <span class="template-sub">Идентификатор для mTLS/VPN сценариев · clientAuth</span>
           </button>
         </div>
       </div>

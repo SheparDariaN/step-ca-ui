@@ -14,7 +14,7 @@
     {{if .TOTPEnabled}}
       <span class="badge ok">2FA включена</span>
     {{else}}
-      <span class="badge warn">2FA не включена</span>
+      <span class="badge danger">2FA не включена — запуск команд заблокирован</span>
       <a href="/profile/2fa" class="btn btn-ghost btn-sm">Настроить 2FA</a>
     {{end}}
   </div>
@@ -28,13 +28,13 @@
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       <label for="command_id">Команда</label>
       <div class="admin-console-row">
-        <select id="command_id" name="command_id" required>
+        <select id="command_id" name="command_id" required {{if not .TOTPEnabled}}disabled{{end}}>
           <option value="">Выберите команду</option>
           {{range .Commands}}
             <option value="{{.ID}}" {{if eq $.SelectedCommandID .ID}}selected{{end}}>{{.Label}} — {{.Name}}{{range .Args}} {{.}}{{end}}</option>
           {{end}}
         </select>
-        <button class="btn primary" type="submit">Выполнить</button>
+        <button class="btn primary" type="submit" {{if not .TOTPEnabled}}disabled{{end}}>Выполнить</button>
       </div>
       <div class="admin-console-command-list">
         {{range .Commands}}

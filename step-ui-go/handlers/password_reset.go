@@ -221,14 +221,22 @@ func (h *Handler) absoluteURL(r *http.Request, path string) string {
 }
 
 func sendPasswordResetMail(ctx context.Context, host string, port int, securityMode, username, password, from, to, link string) error {
+	subject := "Step-CA UI password reset"
+	body := fmt.Sprintf("Password reset was requested for your Step-CA UI account.\r\n\r\nOpen this link within 30 minutes:\r\n%s\r\n\r\nIf you did not request this, ignore this email.\r\n", link)
+	return sendSMTPMail(ctx, host, port, securityMode, username, password, from, []string{to}, subject, body)
+}
+
+// sendSMTPMail отправляет plain-text письмо по настройкам SMTP из админки.
+func sendSMTPMail(ctx context.Context, host string, port int, securityMode, username, password, from string, to []string, subject, body string) error {
+	if len(to) == 0 {
+		return fmt.Errorf("recipient list is empty")
+	}
 	if port <= 0 {
 		port = 587
 	}
 	addr := fmt.Sprintf("%s:%d", host, port)
-	subject := "Step-CA UI password reset"
-	body := fmt.Sprintf("Password reset was requested for your Step-CA UI account.\r\n\r\nOpen this link within 30 minutes:\r\n%s\r\n\r\nIf you did not request this, ignore this email.\r\n", link)
 	msg := []byte("From: " + from + "\r\n" +
-		"To: " + to + "\r\n" +
+		"To: " + strings.Join(to, ", ") + "\r\n" +
 		"Subject: " + subject + "\r\n" +
 		"MIME-Version: 1.0\r\n" +
 		"Content-Type: text/plain; charset=utf-8\r\n" +
@@ -253,7 +261,7 @@ func sendPasswordResetMail(ctx context.Context, host string, port int, securityM
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
 			return err
 		}
-		return sendSMTP(tlsConn, host, from, []string{to}, msg, auth)
+		return sendSMTP(tlsConn, host, from, to, msg, auth)
 	}
 	client, err := smtp.NewClient(conn, host)
 	if err != nil {
@@ -277,8 +285,10 @@ func sendPasswordResetMail(ctx context.Context, host string, port int, securityM
 	if err := client.Mail(from); err != nil {
 		return err
 	}
-	if err := client.Rcpt(to); err != nil {
-		return err
+	for _, rcpt := range to {
+		if err := client.Rcpt(rcpt); err != nil {
+			return err
+		}
 	}
 	w, err := client.Data()
 	if err != nil {

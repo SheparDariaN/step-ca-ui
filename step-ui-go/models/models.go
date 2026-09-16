@@ -91,13 +91,20 @@ type NotificationSettings struct {
 	SMTPUsername    string
 	SMTPPassword    string
 	SMTPFrom        string
-	UpdatedAt       *time.Time
+	// NotifyEmailTo — получатели алертов, через запятую. Пусто = email-канал
+	// используется только для password reset.
+	NotifyEmailTo    string
+	TelegramEnabled  bool
+	TelegramBotToken string
+	TelegramChatID   string
+	UpdatedAt        *time.Time
 }
 
 type NotificationLog struct {
 	ID        int
 	EventKey  string
 	EventType string
+	Channel   string
 	Severity  string
 	Title     string
 	Message   string
@@ -113,6 +120,14 @@ type PasswordResetToken struct {
 	ExpiresAt time.Time
 	UsedAt    *time.Time
 	CreatedAt time.Time
+}
+
+// SecuritySettings — глобальная политика безопасности UI.
+// Force2FARole: "" (выключено), "admin" или "manager" — минимальная роль,
+// для которой TOTP обязателен.
+type SecuritySettings struct {
+	Force2FARole string
+	UpdatedAt    *time.Time
 }
 
 type CASettings struct {

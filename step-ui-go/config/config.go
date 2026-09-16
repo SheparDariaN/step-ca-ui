@@ -22,6 +22,8 @@ type Config struct {
 	SSLKey        string
 	CAMode        string
 	CAHostPath    string
+	// MetricsToken включает /metrics. Пустое значение — endpoint отключён.
+	MetricsToken string
 }
 
 func Load() *Config {
@@ -43,6 +45,7 @@ func Load() *Config {
 		SSLKey:        "/opt/step-ui/ssl/server.key",
 		CAMode:        getEnv("CA_MODE", "bundled"),
 		CAHostPath:    getEnv("CA_HOST_PATH", ""),
+		MetricsToken:  getEnv("METRICS_TOKEN", ""),
 	}
 }
 

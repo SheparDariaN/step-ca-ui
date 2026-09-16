@@ -317,6 +317,7 @@ build_san_template() {
     {{- fail (printf "SAN %s is not permitted by this provisioner (allowed: ${domains})" .Value) }}
   {{- end }}
   {{- end }}
+  {{- \$purpose := default "server" .Insecure.User.x509Purpose }}
   "subject": {{ toJson .Subject }},
   "sans": {{ toJson .SANs }},
 {{- if typeIs "*rsa.PublicKey" .Insecure.CR.PublicKey }}
@@ -324,7 +325,13 @@ build_san_template() {
 {{- else }}
   "keyUsage": ["digitalSignature"],
 {{- end }}
+{{- if eq \$purpose "client" }}
+  "extKeyUsage": ["clientAuth"]
+{{- else if eq \$purpose "internal" }}
+  "extKeyUsage": ["serverAuth", "clientAuth"]
+{{- else }}
   "extKeyUsage": ["serverAuth"]
+{{- end }}
 }
 EOF
 }

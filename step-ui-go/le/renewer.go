@@ -9,20 +9,25 @@ import (
 	appdb "step-ui/db"
 )
 
-// StartRenewer запускает фоновую горутину которая проверяет сертификаты каждые 24 часа
-func StartRenewer(db *sql.DB) {
+// Notifier доставляет событие в систему уведомлений UI.
+// Совпадает по сигнатуре с handlers.Handler.NotifyAsync.
+type Notifier func(eventKey, eventType, severity, title, message string, meta map[string]string)
+
+// StartRenewer запускает фоновую горутину которая проверяет сертификаты каждые 24 часа.
+// notify может быть nil, тогда уведомления не отправляются.
+func StartRenewer(db *sql.DB, notify Notifier) {
 	go func() {
 		log.Println("[LE] Auto-renewer started (checks every 24h)")
 		// Первая проверка через 5 минут после старта
 		time.Sleep(5 * time.Minute)
 		for {
-			runRenewal(db)
+			runRenewal(db, notify)
 			time.Sleep(24 * time.Hour)
 		}
 	}()
 }
 
-func runRenewal(db *sql.DB) {
+func runRenewal(db *sql.DB, notify Notifier) {
 	certs, err := appdb.GetLECertsForRenewal(db)
 	if err != nil {
 		log.Printf("[LE] Renewal check error: %v", err)
@@ -67,6 +72,12 @@ func runRenewal(db *sql.DB) {
 			appdb.UpdateLECertStatus(db, cert.ID, "error", err.Error())
 			appdb.AddLELog(db, cert.Domain, "error", fmt.Sprintf("Ошибка обновления: %v", err))
 			log.Printf("[LE] Renewal failed for %s: %v", cert.Domain, err)
+			if notify != nil {
+				notify("", "certificate.renew_failed", "error",
+					"Let's Encrypt auto-renew failed",
+					fmt.Sprintf("Не удалось обновить LE сертификат %s: %v", cert.Domain, err),
+					map[string]string{"domain": cert.Domain, "provider": provider, "source": "lets-encrypt"})
+			}
 			continue
 		}
 		appdb.UpdateLECertPaths(db, cert.ID, result.CertPath, result.KeyPath, result.IssuedAt, result.ExpiresAt)
