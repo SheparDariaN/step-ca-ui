@@ -44,7 +44,7 @@ Highlights:
 - 🎨 **4 themes** — dark, light, blue, auto (follows OS)
 - 🧭 **Admin workspace** — polished admin UI with matching dark, light and blue themes *(new in v1.4.11)*
 - 🛡️ **Built-in security** — CSRF tokens, rate limiting, IP blocking, security log
-- 🌐 **Provisioner inspection** — list and edit step-ca provisioners
+- 🌐 **Provisioner inspection** — list CA provisioners and issue certificates as registered JWK classes
 - 💾 **Backup export** — admin UI and CLI backup bundles with manifest checksums *(new in v1.4.9)*
 - 🔎 **CA integrity checks** — root/intermediate chain, provisioner claims, password sync and pinned step-ca image *(new in v1.5.0)*
 - 🔬 **Certificate details** — SANs, fingerprints, key usage, cert/key pair and chain validation *(new in v1.5.1)*
@@ -215,6 +215,28 @@ sudo ./install.sh --mode backup --lang en
 Backups include PostgreSQL, `step-ca-data`, Step-CA UI data/certs/uploads and
 `manifest.json` with SHA-256 checksums. Restore is manual by design; follow
 [BACKUP_RESTORE.md](BACKUP_RESTORE.md).
+</details>
+
+<details>
+<summary><b>How do I add extra JWK provisioners (web, mTLS, client) and issue from the UI?</b></summary>
+
+Do not put the UI `admin` JWK password on service hosts. Create class provisioners on the Docker host:
+
+```bash
+sudo ./provisioner.sh --mode create --playbook web --lang en
+```
+
+Recipes live in `playbooks/provisioners/` (`web`, `mtls`, `client`, `custom`). The CLI asks for name, default/max duration (`720h` / `4380h` / `8760h` / `87600h`), and a JWK password (generated or entered). `--mode create` writes the JWK into `ca.json` (bundled container or same-host native CA via `CA_HOST_PATH`, default `/etc/step-ca`), reloads step-ca, and registers the encrypted password in PostgreSQL. `register-only` is for a JWK that already exists on the CA (including a remote CA).
+
+If the JWK already exists on the CA:
+
+```bash
+sudo ./provisioner.sh --mode register-only --playbook web --lang en
+sudo ./provisioner.sh --mode list --lang en
+```
+
+Then on **Issue certificate** choose the provisioner. UI templates (`server` / `internal` / …) only set form defaults; they do not switch the CA provisioner. Duration cannot exceed that JWK's max. The system provisioner (`admin`) cannot be overwritten via this CLI.
+
 </details>
 
 <details>

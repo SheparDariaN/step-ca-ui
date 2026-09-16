@@ -29,7 +29,24 @@
       </div>
     </div>
 
-    <!-- ── Шаблон выпуска ── -->
+    <!-- ── Провизионер ── -->
+    <div class="card">
+      <div class="card-header"><h3>Провизионер</h3></div>
+      <div class="card-body">
+        <div>
+          <label>Выпуск от имени</label>
+          <select name="provisioner" id="provisionerSelect">
+            {{range .RegisteredProvisioners}}
+            <option value="{{.Name}}" data-default="{{.DefaultDuration}}" data-max="{{.MaxDuration}}" {{if eq .Name $.SelectedProvisioner}}selected{{end}}>{{.Name}}{{if .IsSystem}} (system){{end}} — max {{.MaxDuration}}</option>
+            {{else}}
+            <option value="{{.SelectedProvisioner}}" selected>{{.SelectedProvisioner}}</option>
+            {{end}}
+          </select>
+          <span class="hint" style="display:block;margin-top:6px;font-size:12px;color:var(--muted)">Шаблоны UI не заменяют провизионер CA. Срок выпуска не может превышать max выбранного JWK.</span>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-header"><h3>Шаблон и policy</h3></div>
       <div class="card-body">
@@ -107,6 +124,7 @@
     <div class="card-header"><h3>Предпросмотр</h3></div>
     <div class="card-body">
       <div class="info-row"><div class="info-key">Название</div><div class="info-val"><strong id="pvName" style="color:var(--muted)">—</strong></div></div>
+      <div class="info-row"><div class="info-key">Провизионер</div><div class="info-val"><code id="pvProvisioner">—</code></div></div>
       <div class="info-row"><div class="info-key">Шаблон</div><div class="info-val"><span class="badge gray" id="pvTemplate">Server TLS</span></div></div>
       <div class="info-row"><div class="info-key">Домен</div><div class="info-val"><code id="pvDomain">—</code></div></div>
       <div class="info-row"><div class="info-key">Тип ключа</div><div class="info-val"><span class="badge blue" id="pvType">EC P-256</span></div></div>
@@ -157,10 +175,12 @@
 }
 .chip:hover{border-color:var(--muted)}
 .chip.active{border-color:var(--accent);background:var(--active-nav);color:var(--accent);font-weight:600}
+.chip.disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
 </style>
 
 <script>
 (function(){
+  var PROVISIONERS = {{if .ProvisionersJSON}}{{.ProvisionersJSON}}{{else}}[]{{end}};
   var DURATIONS = {
     '720h':    { label: '1 месяц',   days: 30 },
     '4380h':   { label: '6 месяцев', days: 182 },
@@ -186,17 +206,54 @@
   var pvType     = document.getElementById('pvType');
   var pvDuration = document.getElementById('pvDuration');
   var pvExpires  = document.getElementById('pvExpires');
+  var pvProvisioner = document.getElementById('pvProvisioner');
   var tplInput   = document.getElementById('templateInput');
   var keyInput   = document.getElementById('keyTypeInput');
   var durInput   = document.getElementById('durationInput');
   var fName      = document.getElementById('fName');
   var fDomain    = document.getElementById('fDomain');
+  var provSelect = document.getElementById('provisionerSelect');
+
+  function hoursOf(dur){
+    var n = parseInt(String(dur).replace('h',''), 10);
+    return isNaN(n) ? 0 : n;
+  }
+
+  function selectedProvisioner(){
+    var name = provSelect ? provSelect.value : '';
+    for (var i = 0; i < PROVISIONERS.length; i++){
+      if (PROVISIONERS[i].name === name) return PROVISIONERS[i];
+    }
+    var opt = provSelect && provSelect.options[provSelect.selectedIndex];
+    if (!opt) return null;
+    return {
+      name: opt.value,
+      default_duration: opt.getAttribute('data-default') || '8760h',
+      max_duration: opt.getAttribute('data-max') || '87600h'
+    };
+  }
+
+  function applyProvisionerLimits(){
+    var p = selectedProvisioner();
+    var maxH = p ? hoursOf(p.max_duration) : 87600;
+    document.querySelectorAll('.chip').forEach(function(c){
+      var h = hoursOf(c.getAttribute('data-val'));
+      c.classList.toggle('disabled', h > maxH);
+    });
+    if (hoursOf(durInput.value) > maxH && p){
+      setDuration(p.max_duration);
+    }
+  }
 
   function updatePreview(){
     pvName.textContent    = fName.value   || '—';
     pvName.style.color    = fName.value   ? 'var(--text)'  : 'var(--muted)';
     pvDomain.textContent  = fDomain.value || '—';
     pvTemplate.textContent = TEMPLATE_LABEL[tplInput.value] || tplInput.value;
+    if (pvProvisioner){
+      var p = selectedProvisioner();
+      pvProvisioner.textContent = p ? p.name : '—';
+    }
     var kt = keyInput.value;
     pvType.textContent = KEYTYPE_LABEL[kt] || kt;
     var d = DURATIONS[durInput.value];
@@ -229,6 +286,7 @@
       fDomain.placeholder = this.getAttribute('data-placeholder') || 'example.com';
       setKeyType(this.getAttribute('data-key') || 'EC:P-256');
       setDuration(this.getAttribute('data-duration') || '8760h');
+      applyProvisionerLimits();
       updatePreview();
     });
   });
@@ -246,6 +304,7 @@
   // Чипы срока
   document.querySelectorAll('.chip').forEach(function(chip){
     chip.addEventListener('click', function(){
+      if (this.classList.contains('disabled')) return;
       document.querySelectorAll('.chip').forEach(function(c){c.classList.remove('active');});
       this.classList.add('active');
       durInput.value = this.getAttribute('data-val');
@@ -253,8 +312,16 @@
     });
   });
 
+  if (provSelect){
+    provSelect.addEventListener('change', function(){
+      applyProvisionerLimits();
+      updatePreview();
+    });
+  }
+
   fName.addEventListener('input', updatePreview);
   fDomain.addEventListener('input', updatePreview);
+  applyProvisionerLimits();
   updatePreview();
 })();
 </script>

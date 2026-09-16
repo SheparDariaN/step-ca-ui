@@ -68,6 +68,7 @@
     <div class="info-row"><div class="info-key">SHA-1</div><div class="info-val"><code>{{.Detail.FingerprintSHA1}}</code></div></div>
     <div class="info-row"><div class="info-key">Valid from</div><div class="info-val">{{fmtLog .Detail.NotBefore}}</div></div>
     <div class="info-row"><div class="info-key">Valid until</div><div class="info-val">{{fmtLog .Detail.NotAfter}}</div></div>
+    <div class="info-row"><div class="info-key">Provisioner</div><div class="info-val"><code>{{if .Cert.Provisioner}}{{.Cert.Provisioner}}{{else}}—{{end}}</code></div></div>
     <div class="info-row"><div class="info-key">Signature</div><div class="info-val">{{.Detail.Signature}}</div></div>
     <div class="info-row"><div class="info-key">Cert path</div><div class="info-val"><code>{{.Detail.CertPath}}</code></div></div>
     <div class="info-row"><div class="info-key">Key path</div><div class="info-val"><code>{{.Detail.KeyPath}}</code></div></div>

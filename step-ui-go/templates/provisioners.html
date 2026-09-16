@@ -35,10 +35,24 @@
     </div>
   </div>
 </div>
+<div class="card" style="margin-bottom:16px">
+  <div class="card-header"><h3>Зарегистрированы для выпуска из UI</h3></div>
+  <div class="card-body">
+    {{range .RegisteredProvisioners}}
+    <div class="info-row">
+      <div class="info-key"><code>{{.Name}}</code>{{if .IsSystem}} <span class="badge gray">system</span>{{end}}</div>
+      <div class="info-val">{{.Type}} · default {{.DefaultDuration}} · max {{.MaxDuration}}</div>
+    </div>
+    {{else}}
+    <div style="color:var(--muted)">Нет зарегистрированных провизионеров. Создайте через <code>./provisioner.sh</code>.</div>
+    {{end}}
+    <p class="hint" style="font-size:12px;color:var(--muted);margin:10px 0 0">Создание и удаление — только CLI. Пароли в UI не отображаются.</p>
+  </div>
+</div>
 {{range .Provisioners}}
 <div class="prov-card">
-  <div class="prov-name">{{index . "name"}}</div>
-  <div class="prov-type">Тип: {{index . "type"}}</div>
+  <div class="prov-name">{{.Name}}{{if .Registered}} <span class="badge ok">UI</span>{{end}}</div>
+  <div class="prov-type">Тип: {{.Type}}</div>
 </div>
 {{else}}
 <div class="card"><div class="card-body" style="color:var(--muted);text-align:center;padding:24px">Нет провижионеров или CA недоступен</div></div>

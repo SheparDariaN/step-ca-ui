@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"os/exec"
+
+	appdb "step-ui/db"
 )
 
 func (h *Handler) Provisioners(w http.ResponseWriter, r *http.Request) {
@@ -18,8 +20,25 @@ func (h *Handler) Provisioners(w http.ResponseWriter, r *http.Request) {
 			json.Unmarshal(out, &provs)
 		}
 	}
+	registered, _ := appdb.ListCAProvisioners(h.db)
+	registeredSet := map[string]bool{}
+	for _, p := range registered {
+		registeredSet[p.Name] = true
+	}
+	type liveProv struct {
+		Name       string
+		Type       string
+		Registered bool
+	}
+	live := make([]liveProv, 0, len(provs))
+	for _, p := range provs {
+		name, _ := p["name"].(string)
+		typ, _ := p["type"].(string)
+		live = append(live, liveProv{Name: name, Type: typ, Registered: registeredSet[name]})
+	}
 	data := h.base(w, r, "prov")
-	data["Provisioners"] = provs
+	data["Provisioners"] = live
+	data["RegisteredProvisioners"] = registered
 	data["CAURL"] = ca.URL
 	data["RootCert"] = ca.RootCert
 	data["Provisioner"] = ca.Provisioner

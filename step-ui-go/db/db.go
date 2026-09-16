@@ -140,6 +140,9 @@ func InitSchema(d *sql.DB) error {
 	if err := InitCASchema(d); err != nil {
 		return err
 	}
+	if err := InitCAProvisionerSchema(d); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -384,7 +387,7 @@ func GetAuthStats(d *sql.DB) (ok, fail int) {
 // ─── Certificates ─────────────────────────────────────────────────────────────
 
 func GetCerts(d *sql.DB, statusFilter string) ([]*models.Certificate, error) {
-	q := `SELECT id,name,domain,cert_path,key_path,issued_at,expires_at,COALESCE(serial,''),status,COALESCE(key_type,''),created_at FROM certificates`
+	q := `SELECT id,name,domain,cert_path,key_path,issued_at,expires_at,COALESCE(serial,''),status,COALESCE(key_type,''),COALESCE(provisioner,''),created_at FROM certificates`
 	var args []interface{}
 	if statusFilter != "" {
 		q += ` WHERE status=$1`
@@ -399,7 +402,7 @@ func GetCerts(d *sql.DB, statusFilter string) ([]*models.Certificate, error) {
 	var certs []*models.Certificate
 	for rows.Next() {
 		c := &models.Certificate{}
-		rows.Scan(&c.ID, &c.Name, &c.Domain, &c.CertPath, &c.KeyPath, &c.IssuedAt, &c.ExpiresAt, &c.Serial, &c.Status, &c.KeyType, &c.CreatedAt)
+		rows.Scan(&c.ID, &c.Name, &c.Domain, &c.CertPath, &c.KeyPath, &c.IssuedAt, &c.ExpiresAt, &c.Serial, &c.Status, &c.KeyType, &c.Provisioner, &c.CreatedAt)
 		certs = append(certs, c)
 	}
 	return certs, nil
@@ -407,8 +410,8 @@ func GetCerts(d *sql.DB, statusFilter string) ([]*models.Certificate, error) {
 
 func GetCert(d *sql.DB, id int) (*models.Certificate, error) {
 	c := &models.Certificate{}
-	err := d.QueryRow(`SELECT id,name,domain,cert_path,key_path,issued_at,expires_at,COALESCE(serial,''),status,COALESCE(key_type,''),created_at FROM certificates WHERE id=$1`, id).
-		Scan(&c.ID, &c.Name, &c.Domain, &c.CertPath, &c.KeyPath, &c.IssuedAt, &c.ExpiresAt, &c.Serial, &c.Status, &c.KeyType, &c.CreatedAt)
+	err := d.QueryRow(`SELECT id,name,domain,cert_path,key_path,issued_at,expires_at,COALESCE(serial,''),status,COALESCE(key_type,''),COALESCE(provisioner,''),created_at FROM certificates WHERE id=$1`, id).
+		Scan(&c.ID, &c.Name, &c.Domain, &c.CertPath, &c.KeyPath, &c.IssuedAt, &c.ExpiresAt, &c.Serial, &c.Status, &c.KeyType, &c.Provisioner, &c.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -416,11 +419,11 @@ func GetCert(d *sql.DB, id int) (*models.Certificate, error) {
 }
 
 func InsertCert(d *sql.DB, c *models.Certificate) error {
-	_, err := d.Exec(`INSERT INTO certificates (name,domain,cert_path,key_path,issued_at,expires_at,serial,status,key_type)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,'active',$8)
+	_, err := d.Exec(`INSERT INTO certificates (name,domain,cert_path,key_path,issued_at,expires_at,serial,status,key_type,provisioner)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,'active',$8,$9)
 		ON CONFLICT (serial) DO UPDATE SET
-			name=$1,domain=$2,cert_path=$3,key_path=$4,issued_at=$5,expires_at=$6,key_type=$8,status='active'`,
-		c.Name, c.Domain, c.CertPath, c.KeyPath, c.IssuedAt, c.ExpiresAt, c.Serial, c.KeyType)
+			name=$1,domain=$2,cert_path=$3,key_path=$4,issued_at=$5,expires_at=$6,key_type=$8,provisioner=$9,status='active'`,
+		c.Name, c.Domain, c.CertPath, c.KeyPath, c.IssuedAt, c.ExpiresAt, c.Serial, c.KeyType, c.Provisioner)
 	return err
 }
 
@@ -477,8 +480,8 @@ func GetHistory(d *sql.DB, actions []string, cert string, page, limit int) ([]*m
 
 func GetCertBySerial(d *sql.DB, serial string) (*models.Certificate, error) {
 	c := &models.Certificate{}
-	err := d.QueryRow(`SELECT id,name,domain,cert_path,key_path,issued_at,expires_at,COALESCE(serial,''),status,COALESCE(key_type,''),created_at FROM certificates WHERE serial=$1`, serial).
-		Scan(&c.ID, &c.Name, &c.Domain, &c.CertPath, &c.KeyPath, &c.IssuedAt, &c.ExpiresAt, &c.Serial, &c.Status, &c.KeyType, &c.CreatedAt)
+	err := d.QueryRow(`SELECT id,name,domain,cert_path,key_path,issued_at,expires_at,COALESCE(serial,''),status,COALESCE(key_type,''),COALESCE(provisioner,''),created_at FROM certificates WHERE serial=$1`, serial).
+		Scan(&c.ID, &c.Name, &c.Domain, &c.CertPath, &c.KeyPath, &c.IssuedAt, &c.ExpiresAt, &c.Serial, &c.Status, &c.KeyType, &c.Provisioner, &c.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

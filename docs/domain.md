@@ -26,6 +26,8 @@ Pre-configured profiles in `step-ui-go/handlers/cert_ops.go`:
 Allowed durations: `720h` (30 days), `4380h` (6 months), `8760h` (1 year), `87600h` (10 years).
 Allowed key types: `EC:P-256`, `EC:P-384`, `RSA:2048`, `RSA:4096`.
 
+UI templates are form presets. They do not select a step-ca provisioner. Issue/renew uses a **registered JWK** from `ca_provisioners` (seeded `admin` plus playbook-created classes). The requested `--not-after` must not exceed that provisioner's `max_duration`. System provisioner `admin` cannot be overwritten via `./provisioner.sh`. `--mode create` writes the JWK on bundled step-ca or a same-host native CA (`CA_HOST_PATH` / `/etc/step-ca`); `register-only` is for an already existing JWK.
+
 ## Canonical Russian UI & Error Strings
 
 To maintain system consistency and security guarantees, do not paraphrase these canonical strings:

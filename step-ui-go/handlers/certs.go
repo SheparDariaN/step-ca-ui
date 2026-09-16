@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"net/http"
 	"os"
 	"os/exec"
@@ -155,7 +156,9 @@ func (h *Handler) Certificates(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) IssueGet(w http.ResponseWriter, r *http.Request) {
-	h.render(w, "issue", h.base(w, r, "issue"))
+	data := h.base(w, r, "issue")
+	h.attachIssueProvisioners(data)
+	h.render(w, "issue", data)
 }
 
 func (h *Handler) IssuePost(w http.ResponseWriter, r *http.Request) {
@@ -165,8 +168,10 @@ func (h *Handler) IssuePost(w http.ResponseWriter, r *http.Request) {
 	si := h.sessionInfo(r)
 	name := trimStr(r.FormValue("name"))
 	domain := trimStr(r.FormValue("domain"))
+	provisionerName := trimStr(r.FormValue("provisioner"))
 	policy, policyErr := normalizeIssuePolicy(r.FormValue("template"), r.FormValue("duration"), r.FormValue("key_type"), domain)
 	data := h.base(w, r, "issue")
+	h.attachIssueProvisioners(data)
 	if name == "" || domain == "" {
 		data["Msgs"] = []models.FlashMsg{{Type: "err", Text: "Заполните все поля"}}
 		h.render(w, "issue", data)
@@ -177,11 +182,25 @@ func (h *Handler) IssuePost(w http.ResponseWriter, r *http.Request) {
 		h.render(w, "issue", data)
 		return
 	}
+	if provisionerName == "" {
+		provisionerName = h.CA().Provisioner
+	}
+	prov, err := appdb.GetCAProvisioner(h.db, provisionerName)
+	if err != nil || prov == nil {
+		data["Msgs"] = []models.FlashMsg{{Type: "err", Text: "Провизионер не зарегистрирован в UI"}}
+		h.render(w, "issue", data)
+		return
+	}
+	if durationExceedsMax(policy.Duration, prov.MaxDuration) {
+		data["Msgs"] = []models.FlashMsg{{Type: "err", Text: "Срок действия превышает max выбранного провизионера"}}
+		h.render(w, "issue", data)
+		return
+	}
 	certDir := filepath.Join(h.cfg.CertsDir, sanitizeName(name))
 	os.MkdirAll(certDir, 0755)
 	certPath := filepath.Join(certDir, "certificate.crt")
 	keyPath := filepath.Join(certDir, "private.key")
-	if err := h.issueCert(domain, certPath, keyPath, policy.Duration, policy.KeyType); err != nil {
+	if err := h.issueWithRegisteredProvisioner(domain, certPath, keyPath, policy.Duration, policy.KeyType, provisionerName); err != nil {
 		h.notifyAsync("", "certificate.issue_failed", "error",
 			"Certificate issue failed",
 			fmt.Sprintf("Не удалось выпустить сертификат %s для %s: %s", name, domain, err.Error()),
@@ -193,9 +212,9 @@ func (h *Handler) IssuePost(w http.ResponseWriter, r *http.Request) {
 	issued, expires, serial, _ := parseCertDates(certPath)
 	appdb.InsertCert(h.db, &models.Certificate{
 		Name: name, Domain: domain, CertPath: certPath, KeyPath: keyPath,
-		IssuedAt: issued, ExpiresAt: expires, Serial: serial, KeyType: policy.KeyType,
+		IssuedAt: issued, ExpiresAt: expires, Serial: serial, KeyType: policy.KeyType, Provisioner: provisionerName,
 	})
-	appdb.InsertHistory(h.db, "issue", name, domain, fmt.Sprintf("Шаблон: %s, тип: %s, срок: %s", policy.Template, policy.KeyType, policy.Duration), si.Username, si.Role)
+	appdb.InsertHistory(h.db, "issue", name, domain, fmt.Sprintf("Шаблон: %s, тип: %s, срок: %s, провизионер: %s", policy.Template, policy.KeyType, policy.Duration, provisionerName), si.Username, si.Role)
 	h.flash(w, r, "ok", fmt.Sprintf("Сертификат %s для %s выпущен (%s)!", name, domain, policy.KeyType))
 	http.Redirect(w, r, "/issue", http.StatusFound)
 }
@@ -209,13 +228,21 @@ func (h *Handler) Renew(w http.ResponseWriter, r *http.Request) {
 		if keyType == "" {
 			keyType = "EC:P-256"
 		}
-		if err := h.issueCert(c.Domain, c.CertPath, c.KeyPath, "8760h", keyType); err == nil {
+		provisionerName := c.Provisioner
+		if provisionerName == "" {
+			provisionerName = h.CA().Provisioner
+		}
+		renewDuration := "8760h"
+		if prov, _ := appdb.GetCAProvisioner(h.db, provisionerName); prov != nil && durationExceedsMax(renewDuration, prov.MaxDuration) {
+			renewDuration = prov.MaxDuration
+		}
+		if err := h.issueWithRegisteredProvisioner(c.Domain, c.CertPath, c.KeyPath, renewDuration, keyType, provisionerName); err == nil {
 			issued, expires, serial, _ := parseCertDates(c.CertPath)
 			appdb.InsertCert(h.db, &models.Certificate{
 				Name: c.Name, Domain: c.Domain, CertPath: c.CertPath, KeyPath: c.KeyPath,
-				IssuedAt: issued, ExpiresAt: expires, Serial: serial, KeyType: keyType,
+				IssuedAt: issued, ExpiresAt: expires, Serial: serial, KeyType: keyType, Provisioner: provisionerName,
 			})
-			appdb.InsertHistory(h.db, "renew", c.Name, c.Domain, "Перевыпуск, тип: "+keyType, si.Username, si.Role)
+			appdb.InsertHistory(h.db, "renew", c.Name, c.Domain, "Перевыпуск, тип: "+keyType+", провизионер: "+provisionerName, si.Username, si.Role)
 			h.flash(w, r, "ok", "Сертификат перевыпущен")
 		} else {
 			h.notifyAsync("", "certificate.renew_failed", "error",
@@ -471,4 +498,40 @@ func (h *Handler) APIStatus(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"total": len(certs), "expiring_soon": expiring,
 	})
+}
+
+type issueProvisionerOption struct {
+	Name            string `json:"name"`
+	Type            string `json:"type"`
+	DefaultDuration string `json:"default_duration"`
+	MaxDuration     string `json:"max_duration"`
+	IsSystem        bool   `json:"is_system"`
+}
+
+func (h *Handler) attachIssueProvisioners(data map[string]interface{}) {
+	list, err := appdb.ListCAProvisioners(h.db)
+	if err != nil {
+		list = nil
+	}
+	opts := make([]issueProvisionerOption, 0, len(list))
+	selected := h.CA().Provisioner
+	for _, p := range list {
+		opts = append(opts, issueProvisionerOption{
+			Name:            p.Name,
+			Type:            p.Type,
+			DefaultDuration: p.DefaultDuration,
+			MaxDuration:     p.MaxDuration,
+			IsSystem:        p.IsSystem,
+		})
+		if p.IsSystem {
+			selected = p.Name
+		}
+	}
+	if selected == "" && len(opts) > 0 {
+		selected = opts[0].Name
+	}
+	raw, _ := json.Marshal(opts)
+	data["RegisteredProvisioners"] = opts
+	data["SelectedProvisioner"] = selected
+	data["ProvisionersJSON"] = template.JS(raw)
 }

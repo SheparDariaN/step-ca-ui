@@ -100,6 +100,17 @@ func init() {
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "provisioner-register", "provisioner-list":
+			if err := runProvisionerCLI(os.Args[1:]); err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+	}
+
 	handlers.StartedAt = time.Now()
 	// Регистрируем типы для gob (gorilla/sessions)
 	gob.Register(int(0))
@@ -125,6 +136,10 @@ func main() {
 	}
 	if err := appdb.InitPasswordResetSchema(conn); err != nil {
 		log.Fatalf("Cannot init password reset schema: %v", err)
+	}
+	sysPassword, _ := appdb.ReadProvisionerPasswordFile(cfg.PasswordFile)
+	if err := appdb.EnsureSystemProvisioner(conn, cfg.Provisioner, sysPassword, cfg.SecretKey); err != nil {
+		log.Printf("[startup] warning: could not seed system provisioner: %v", err)
 	}
 
 	// ─── Sessions ────────────────────────────────────────────────────────────

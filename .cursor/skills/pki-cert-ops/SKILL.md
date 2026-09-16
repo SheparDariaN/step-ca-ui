@@ -9,10 +9,11 @@ Step-CA UI invokes the Smallstep `step` CLI binary inside the `step-ui` containe
 
 ## Core Implementation Files
 
-- **CLI invocation wrappers**: `step-ui-go/handlers/cert_ops.go` (`issueCert`, `revokeStep`, `parseCertDates`)
+- **CLI invocation wrappers**: `step-ui-go/handlers/cert_ops.go` (`issueCert`, `issueWithRegisteredProvisioner`, `revokeStep`, `parseCertDates`)
 - **Web handlers**: `step-ui-go/handlers/certs.go` (`IssueGet`, `IssuePost`, `Renew`, `Revoke`, `ImportPost`)
 - **Certificate inspection**: `step-ui-go/handlers/cert_details.go` (`CertificateDetails`, `validateCertKeyPair`, `validateCertChain`)
-- **Database records**: `step-ui-go/db/db.go` (`certificates` and `cert_history` tables)
+- **Database records**: `step-ui-go/db/db.go`, `step-ui-go/db/provisioners.go` (`certificates`, `cert_history`, `ca_provisioners`)
+- **Host playbooks**: `provisioner.sh`, `playbooks/provisioners/*.conf`
 
 ## Invariants & Policies
 
@@ -26,7 +27,7 @@ Step-CA UI invokes the Smallstep `step` CLI binary inside the `step-ui` containe
    - Key types: `EC:P-256`, `EC:P-384`, `RSA:2048`, `RSA:4096`.
 3. **Execution Safety**:
    - Always invoke `exec.Command("step", args...)` with explicit arguments array. Never run unescaped shell concatenation.
-   - Use provisioner password file via `--provisioner-password-file cfg.PasswordFile`.
+   - Use provisioner password file via `--provisioner-password-file` (registered JWK from `ca_provisioners`, never pass the password on argv).
    - Point to CA with `--ca-url cfg.CAURL` and `--root cfg.RootCert`.
 4. **Storage & DB Synchronization**:
    - Cert files are saved in `/opt/step-ui/certs/<name>.crt` and `.key`.

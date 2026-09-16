@@ -19,9 +19,9 @@ Self-hosted web UI for smallstep `step-ca` private PKI running in 3 Docker Compo
 - **HTTP Handlers**: `step-ui-go/handlers/*.go` (`certs.go`, `cert_ops.go`, `auth.go`, `admin.go`, `admin_console.go`, `backup.go`, `health.go`, etc.)
 - **HTML Templates**: `step-ui-go/templates/*.html` (base: `base.html`, admin base: `admin_base.html`)
 - **Static Assets**: `step-ui-go/static/css/*.css`, `step-ui-go/static/js/*.js`
-- **Database schema & queries**: `step-ui-go/db/*.go` (`db.go`, `le_db.go`, `password_reset.go`, `notifications.go`)
+- **Database schema & queries**: `step-ui-go/db/*.go` (`db.go`, `provisioners.go`, `le_db.go`, `password_reset.go`, `notifications.go`)
 - **Security & cryptography**: `step-ui-go/security/*.go` (bcrypt, rate limiting, password validation)
-- **Deployment & scripts**: `docker-compose.yml`, `install.sh`, `step-ca-bootstrap.sh`, `step-ui-go/Dockerfile`
+- **Deployment & scripts**: `docker-compose.yml`, `install.sh`, `provisioner.sh`, `playbooks/provisioners/`, `step-ca-bootstrap.sh`, `step-ui-go/Dockerfile`
 
 ## Hard Invariants
 

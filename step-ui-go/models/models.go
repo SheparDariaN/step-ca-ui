@@ -29,17 +29,28 @@ type AuthLog struct {
 }
 
 type Certificate struct {
-	ID        int
-	Name      string
-	Domain    string
-	CertPath  string
-	KeyPath   string
-	IssuedAt  *time.Time
-	ExpiresAt *time.Time
-	Serial    string
-	Status    string
-	KeyType   string
-	CreatedAt *time.Time
+	ID          int
+	Name        string
+	Domain      string
+	CertPath    string
+	KeyPath     string
+	IssuedAt    *time.Time
+	ExpiresAt   *time.Time
+	Serial      string
+	Status      string
+	KeyType     string
+	Provisioner string
+	CreatedAt   *time.Time
+}
+
+type CAProvisioner struct {
+	Name              string
+	Type              string
+	DefaultDuration   string
+	MaxDuration       string
+	EncryptedPassword string
+	IsSystem          bool
+	CreatedAt         time.Time
 }
 
 type CertHistory struct {

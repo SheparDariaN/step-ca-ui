@@ -20,7 +20,7 @@ The application is deployed using Docker Compose across three services on an iso
 ```
 
 - **`step-ui`**: Go binary serving SSR HTML templates and static assets over HTTPS (port 8443). Interacts with PostgreSQL via `lib/pq` and issues PKI commands via the installed `/usr/local/bin/step` CLI.
-- **`postgres`**: Relational database storing user credentials, certificate metadata, history, notification settings, and audit logs.
+- **`postgres`**: Relational database storing user credentials, certificate metadata, registered JWK provisioner secrets, history, notification settings, and audit logs.
 - **`step-ca`**: Smallstep certificate authority daemon listening on internal port 9443. Manages private keys and issues X.509 certificates.
 
 ## Data Volumes

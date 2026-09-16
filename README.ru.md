@@ -44,7 +44,7 @@
 - 🎨 **4 темы** — тёмная, светлая, синяя, авто (по системе)
 - 🧭 **Админ-пространство** — обновлённый интерфейс админки с корректными тёмной, светлой и синей темами *(новинка v1.4.11)*
 - 🛡️ **Встроенная безопасность** — CSRF-токены, rate limiting, блокировка IP, журнал
-- 🌐 **Provisioner'ы step-ca** — список и редактирование
+- 🌐 **Provisioner'ы step-ca** — список CA и выпуск сертификатов от зарегистрированных JWK-классов
 - 💾 **Экспорт бэкапа** — backup bundle из UI и CLI с manifest checksums *(новинка v1.4.9)*
 - 🔎 **CA integrity checks** — проверка root/intermediate chain, provisioner claims, password sync и закреплённого step-ca image *(новинка v1.5.0)*
 - 🔬 **Детали сертификата** — SAN, fingerprints, key usage, cert/key pair и chain validation *(новинка v1.5.1)*
@@ -216,6 +216,28 @@ sudo ./install.sh --mode backup --lang ru
 Бэкап включает PostgreSQL, `step-ca-data`, данные/сертификаты/uploads Step-CA UI
 и `manifest.json` с SHA-256 checksums. Restore намеренно ручной; инструкция в
 [BACKUP_RESTORE.md](BACKUP_RESTORE.md).
+</details>
+
+<details>
+<summary><b>Как добавить дополнительные JWK-провизионеры (web, mTLS, client) и выпускать из UI?</b></summary>
+
+Не кладите пароль UI-провизионера `admin` на сервисные хосты. Классы создаются на Docker-хосте:
+
+```bash
+sudo ./provisioner.sh --mode create --playbook web --lang ru
+```
+
+Рецепты лежат в `playbooks/provisioners/` (`web`, `mtls`, `client`, `custom`). CLI спрашивает имя, default/max срок (`720h` / `4380h` / `8760h` / `87600h`) и пароль JWK (сгенерировать или ввести). `--mode create` пишет JWK в `ca.json` (bundled-контейнер или нативный CA на том же хосте через `CA_HOST_PATH`, по умолчанию `/etc/step-ca`), перечитывает step-ca и регистрирует пароль в PostgreSQL. `register-only` — если JWK уже есть на CA (в том числе на удалённом).
+
+Если JWK уже есть на CA:
+
+```bash
+sudo ./provisioner.sh --mode register-only --playbook web --lang ru
+sudo ./provisioner.sh --mode list --lang ru
+```
+
+На странице **Выпустить сертификат** выберите провизионер. Шаблоны UI (`server` / `internal` / …) задают только дефолты формы и не переключают провизионер CA. Срок выпуска не может быть больше max этого JWK. Системный провизионер (`admin`) через этот CLI перезаписать нельзя.
+
 </details>
 
 <details>

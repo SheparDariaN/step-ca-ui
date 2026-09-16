@@ -16,6 +16,7 @@ import (
 
 	appdb "step-ui/db"
 	"step-ui/models"
+	"step-ui/security"
 )
 
 type IssuePolicy struct {
@@ -60,17 +61,42 @@ func normalizeIssuePolicy(template, duration, keyType, domain string) (IssuePoli
 	return policy, nil
 }
 
-func (h *Handler) issueCert(domain, certPath, keyPath, duration, keyType string) error {
+func decryptProvisionerPassword(encrypted, secretKey string) (string, error) {
+	return security.DecryptSecret(encrypted, secretKey)
+}
+
+func durationExceedsMax(requested, maxDur string) bool {
+	return appdb.DurationExceedsMax(requested, maxDur)
+}
+
+func (h *Handler) issueCert(domain, certPath, keyPath, duration, keyType, provisioner, passwordFile string) error {
 	ca := h.CA()
 	if !ca.Configured {
 		return fmt.Errorf("Step-CA не настроен. Настройте подключение в разделе Админ -> Настройки CA (/admin/ca)")
 	}
+	if provisioner == "" {
+		provisioner = ca.Provisioner
+	}
+	if passwordFile == "" {
+		passwordFile = ca.PasswordFile
+	}
+	args := stepCertificateArgs(ca.URL, ca.RootCert, provisioner, passwordFile, duration, keyType, domain, certPath, keyPath)
+	log.Printf("[step-cli] step %s", strings.Join(args, " "))
+	cmd := exec.Command("step", args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %s", err, string(out))
+	}
+	return nil
+}
+
+func stepCertificateArgs(caURL, rootCert, provisioner, passwordFile, duration, keyType, domain, certPath, keyPath string) []string {
 	args := []string{
 		"ca", "certificate",
-		"--ca-url", ca.URL,
-		"--root", ca.RootCert,
-		"--provisioner", ca.Provisioner,
-		"--provisioner-password-file", ca.PasswordFile,
+		"--ca-url", caURL,
+		"--root", rootCert,
+		"--provisioner", provisioner,
+		"--provisioner-password-file", passwordFile,
 		"--not-after", duration,
 		"--force",
 	}
@@ -79,14 +105,52 @@ func (h *Handler) issueCert(domain, certPath, keyPath, duration, keyType string)
 	} else if strings.HasPrefix(keyType, "RSA:") {
 		args = append(args, "--kty", "RSA", "--size", strings.TrimPrefix(keyType, "RSA:"))
 	}
-	args = append(args, domain, certPath, keyPath)
-	log.Printf("[step-cli] step %s", strings.Join(args, " "))
-	cmd := exec.Command("step", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s: %s", err, string(out))
+	return append(args, domain, certPath, keyPath)
+}
+
+func (h *Handler) issueWithRegisteredProvisioner(domain, certPath, keyPath, duration, keyType, provisionerName string) error {
+	ca := h.CA()
+	if provisionerName == "" {
+		provisionerName = ca.Provisioner
 	}
-	return nil
+	prov, err := appdb.GetCAProvisioner(h.db, provisionerName)
+	if err != nil {
+		return err
+	}
+	if prov == nil {
+		return fmt.Errorf("провизионер %s не зарегистрирован в UI", provisionerName)
+	}
+	if durationExceedsMax(duration, prov.MaxDuration) {
+		return fmt.Errorf("срок %s превышает max провизионера %s (%s)", duration, prov.Name, prov.MaxDuration)
+	}
+	passwordFile := ca.PasswordFile
+	if prov.EncryptedPassword != "" {
+		plain, decErr := decryptProvisionerPassword(prov.EncryptedPassword, h.cfg.SecretKey)
+		if decErr != nil {
+			return fmt.Errorf("не удалось расшифровать пароль провизионера")
+		}
+		tmp, writeErr := os.CreateTemp("/opt/step-ui/data", "prov-*.pw")
+		if writeErr != nil {
+			tmp, writeErr = os.CreateTemp("", "prov-*.pw")
+		}
+		if writeErr != nil {
+			return writeErr
+		}
+		passwordFile = tmp.Name()
+		defer os.Remove(passwordFile)
+		if _, err := tmp.WriteString(plain); err != nil {
+			tmp.Close()
+			return err
+		}
+		if err := tmp.Chmod(0600); err != nil {
+			tmp.Close()
+			return err
+		}
+		tmp.Close()
+	} else if !prov.IsSystem && provisionerName != ca.Provisioner {
+		return fmt.Errorf("для провизионера %s не задан пароль", provisionerName)
+	}
+	return h.issueCert(domain, certPath, keyPath, duration, keyType, prov.Name, passwordFile)
 }
 
 func (h *Handler) revokeStep(certPath, keyPath string) {

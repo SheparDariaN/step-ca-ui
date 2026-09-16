@@ -33,7 +33,8 @@ All routes are registered in `step-ui-go/main.go` using the `chi/v5` router.
 | `GET` | `/certificates` | `viewer` | No | `h.Certificates` | Certificate list and filters |
 | `GET` | `/certificates/{id}` | `viewer` | No | `h.CertificateDetails` | Detailed certificate inspection |
 | `GET` | `/history` | `viewer` | No | `h.History` | Certificate operations history |
-| `GET` | `/provisioners` | `viewer` | No | `h.Provisioners` | CA provisioners list |
+| `GET` | `/provisioners` | `viewer` | No | `h.Provisioners` | CA provisioners list plus UI-registered JWK classes |
+| `GET` | `/profile` | `viewer` | No | `h.ProfileGet` | User profile page |
 | `GET` | `/profile` | `viewer` | No | `h.ProfileGet` | User profile page |
 | `POST` | `/profile` | `viewer` | Yes | `h.ProfilePost` | Update display name / theme / password |
 | `GET` | `/profile/2fa` | `viewer` | No | `h.Profile2FAGet` | 2FA configuration page |
@@ -46,8 +47,8 @@ All routes are registered in `step-ui-go/main.go` using the `chi/v5` router.
 
 | Method | Path | Min Role | CSRF | Handler | Description |
 |---|---|---|---|---|---|
-| `GET` | `/issue` | `manager` | No | `h.IssueGet` | Form to issue certificate |
-| `POST` | `/issue` | `manager` | Yes | `h.IssuePost` | Issue certificate via step CLI |
+| `GET` | `/issue` | `manager` | No | `h.IssueGet` | Form to issue certificate (select registered provisioner) |
+| `POST` | `/issue` | `manager` | Yes | `h.IssuePost` | Issue certificate via step CLI using selected JWK |
 | `GET` | `/renew/{id}` | `manager` | No | `h.Renew` | Renew active certificate |
 | `GET` | `/import` | `manager` | No | `h.ImportGet` | Certificate import page |
 | `POST` | `/import` | `manager` | Yes | `h.ImportPost` | Import existing certificate |
