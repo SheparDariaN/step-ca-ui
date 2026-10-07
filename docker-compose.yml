@@ -62,7 +62,7 @@ services:
     networks:
       - step-net
     healthcheck:
-      test: ["CMD", "curl", "-sk", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "3", "https://localhost:8443/login"]
+      test: ["CMD-SHELL", "curl -skf -o /dev/null --max-time 3 https://127.0.0.1:8443/login || curl -sf -o /dev/null --max-time 3 http://127.0.0.1:8443/login"]
       interval: 10s
       timeout: 5s
       retries: 10

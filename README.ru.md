@@ -312,7 +312,7 @@ Legacy SHA-256 значение принимается для восстанов
 <details>
 <summary><b>Можно поставить за Cloudflare / Caddy / nginx?</b></summary>
 
-Да. Направьте reverse proxy на `step-ui:8443` (HTTPS upstream) либо переключите step-ui на чистый HTTP и обрабатывайте TLS на прокси. Не забудьте передавать `X-Forwarded-Proto: https`, иначе step-ui будет генерировать неверные URL.
+Да. Направьте reverse proxy на `http://step-ui:8443`: тот же порт принимает и HTTPS напрямую, и обычный HTTP от прокси. Caddy и nginx сами выставляют `X-Forwarded-Proto: https` — по нему строятся ссылки и проверяется схема. Отдельный переключатель не нужен.
 </details>
 
 <details>

@@ -311,7 +311,7 @@ Replace `step-ui-go/ssl/server.crt` and `server.key` with your own cert + key (e
 <details>
 <summary><b>Can I run this behind Cloudflare / Caddy / nginx?</b></summary>
 
-Yes. Point your reverse proxy at `step-ui:8443` (HTTPS upstream) or change step-ui to plain HTTP and put TLS termination on the proxy. Set `X-Forwarded-Proto: https` so step-ui generates correct URLs.
+Yes. Point the reverse proxy at `http://step-ui:8443`. The same port accepts direct HTTPS and plain HTTP from the proxy. Caddy and nginx set `X-Forwarded-Proto: https` themselves; step-ui uses that header for URLs and scheme checks. No extra switch is required.
 </details>
 
 <details>

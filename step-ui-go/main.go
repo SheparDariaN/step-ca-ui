@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/gob"
 	"fmt"
 	"log"
@@ -20,6 +19,7 @@ import (
 	"step-ui/config"
 	appdb "step-ui/db"
 	"step-ui/handlers"
+	"step-ui/httplisten"
 	"step-ui/le"
 	mw "step-ui/middleware"
 	"step-ui/models"
@@ -300,13 +300,10 @@ func main() {
 	}()
 
 	addr := fmt.Sprintf("0.0.0.0:%d", cfg.Port)
-	if _, err := os.Stat(cfg.SSLCert); err == nil {
-		tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
-		srv := &http.Server{Addr: addr, Handler: r, TLSConfig: tlsCfg}
-		fmt.Printf("[*] Starting Step-CA UI (HTTPS) on port %d\n", cfg.Port)
-		log.Fatal(srv.ListenAndServeTLS(cfg.SSLCert, cfg.SSLKey))
-	} else {
+	if _, err := os.Stat(cfg.SSLCert); err != nil {
 		fmt.Printf("[!] SSL cert not found, starting HTTP on port %d\n", cfg.Port)
 		log.Fatal(http.ListenAndServe(addr, r))
 	}
+	fmt.Printf("[*] Starting Step-CA UI on port %d (HTTPS and HTTP from reverse proxy)\n", cfg.Port)
+	log.Fatal(httplisten.Serve(addr, r, cfg.SSLCert, cfg.SSLKey))
 }
