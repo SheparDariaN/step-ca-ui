@@ -163,6 +163,7 @@ func main() {
 	// ─── Let's Encrypt auto-renewer ──────────────────────────────────────────
 	le.StartRenewer(conn, h.NotifyAsync)
 	h.StartNotificationWorker()
+	h.StartCASync()
 
 	// ─── Router ──────────────────────────────────────────────────────────────
 	r := chi.NewRouter()
@@ -211,6 +212,7 @@ func main() {
 			r.Use(mw.RequireRole("manager", store))
 			r.Get("/issue", h.IssueGet)
 			r.Post("/issue", h.IssuePost)
+			r.Post("/certificates/sync", h.SyncCertificatesPost)
 			r.Post("/renew/{id}", h.Renew)
 			r.Get("/import", h.ImportGet)
 			r.Post("/import", h.ImportPost)

@@ -435,6 +435,41 @@ func UpdateCertStatus(d *sql.DB, id int, status string) error {
 	return err
 }
 
+// InsertSyncedCert добавляет сертификат, увиденный в базе step-ca.
+// key_path всегда пустой: CA не хранит ключ клиента.
+func InsertSyncedCert(d *sql.DB, c *models.Certificate, historyDetails string) error {
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT INTO certificates (name,domain,cert_path,key_path,issued_at,expires_at,serial,status,key_type,provisioner)
+		VALUES ($1,$2,$3,'',$4,$5,$6,$7,$8,$9)`,
+		c.Name, c.Domain, c.CertPath, c.IssuedAt, c.ExpiresAt, c.Serial, c.Status, c.KeyType, c.Provisioner); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO cert_history (action,cert_name,domain,details,username,role) VALUES ('sync',$1,$2,$3,'system','system')`,
+		c.Name, c.Domain, historyDetails); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// UpdateSyncedCert обновляет срок, статус и провизионера.
+// name и key_path не меняются. cert_path заполняется только если был пуст.
+func UpdateSyncedCert(d *sql.DB, serial string, issued, expires *time.Time, status, provisioner, keyType, certPathIfEmpty string) error {
+	_, err := d.Exec(`UPDATE certificates SET
+		issued_at=$1,
+		expires_at=$2,
+		status=$3,
+		provisioner=CASE WHEN $4 <> '' THEN $4 ELSE provisioner END,
+		key_type=CASE WHEN COALESCE(key_type,'') = '' THEN $5 ELSE key_type END,
+		cert_path=CASE WHEN COALESCE(cert_path,'') = '' THEN $6 ELSE cert_path END
+		WHERE serial=$7`,
+		issued, expires, status, provisioner, keyType, certPathIfEmpty, serial)
+	return err
+}
+
 // ─── Cert History ─────────────────────────────────────────────────────────────
 
 func InsertHistory(d *sql.DB, action, certName, domain, details, username, role string) error {

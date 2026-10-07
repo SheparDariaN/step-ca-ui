@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/x509"
 	"database/sql"
 	"encoding/pem"
@@ -138,34 +139,61 @@ func (h *Handler) issueWithRegisteredProvisioner(domain, certPath, keyPath, dura
 	if durationExceedsMax(duration, prov.MaxDuration) {
 		return fmt.Errorf("срок %s превышает max провизионера %s (%s)", duration, prov.Name, prov.MaxDuration)
 	}
-	passwordFile := ca.PasswordFile
+	passwordFile, cleanup, err := h.provisionerPasswordFile(prov.Name)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	return h.issueCert(domain, certPath, keyPath, duration, keyType, purpose, prov.Name, passwordFile)
+}
+
+func (h *Handler) provisionerPasswordFile(provisionerName string) (string, func(), error) {
+	cleanup := func() {}
+	ca := h.CA()
+	if provisionerName == "" {
+		provisionerName = ca.Provisioner
+	}
+	prov, err := appdb.GetCAProvisioner(h.db, provisionerName)
+	if err != nil {
+		return "", cleanup, err
+	}
+	if prov == nil {
+		return "", cleanup, fmt.Errorf("провизионер %s не зарегистрирован в UI", provisionerName)
+	}
 	if prov.EncryptedPassword != "" {
 		plain, decErr := decryptProvisionerPassword(prov.EncryptedPassword, h.cfg.SecretKey)
 		if decErr != nil {
-			return fmt.Errorf("не удалось расшифровать пароль провизионера")
+			return "", cleanup, fmt.Errorf("не удалось расшифровать пароль провизионера")
 		}
 		tmp, writeErr := os.CreateTemp("/opt/step-ui/data", "prov-*.pw")
 		if writeErr != nil {
 			tmp, writeErr = os.CreateTemp("", "prov-*.pw")
 		}
 		if writeErr != nil {
-			return writeErr
+			return "", cleanup, writeErr
 		}
-		passwordFile = tmp.Name()
-		defer os.Remove(passwordFile)
+		path := tmp.Name()
+		remove := func() { os.Remove(path) }
 		if _, err := tmp.WriteString(plain); err != nil {
 			tmp.Close()
-			return err
+			remove()
+			return "", cleanup, err
 		}
 		if err := tmp.Chmod(0600); err != nil {
 			tmp.Close()
-			return err
+			remove()
+			return "", cleanup, err
 		}
-		tmp.Close()
-	} else if !prov.IsSystem && provisionerName != ca.Provisioner {
-		return fmt.Errorf("для провизионера %s не задан пароль", provisionerName)
+		if err := tmp.Close(); err != nil {
+			remove()
+			return "", cleanup, err
+		}
+		return path, remove, nil
 	}
-	return h.issueCert(domain, certPath, keyPath, duration, keyType, purpose, prov.Name, passwordFile)
+	if !prov.IsSystem && provisionerName != ca.Provisioner {
+		return "", cleanup, fmt.Errorf("для провизионера %s не задан пароль", provisionerName)
+	}
+	return ca.PasswordFile, cleanup, nil
 }
 
 // certPurposeFromFile определяет x509Purpose по extKeyUsage существующего
@@ -194,18 +222,124 @@ func certPurposeFromFile(certPath string) string {
 	}
 }
 
-func (h *Handler) revokeStep(certPath, keyPath string) {
+func (h *Handler) revokeStep(certPath, keyPath string) error {
 	ca := h.CA()
 	if !ca.Configured {
-		log.Printf("[step-cli] revoke skipped: CA not configured")
-		return
+		return fmt.Errorf("Step-CA не настроен. Настройте подключение в разделе Админ -> Настройки CA (/admin/ca)")
 	}
-	exec.Command("step", "ca", "revoke",
+	if certPath == "" || keyPath == "" {
+		return fmt.Errorf("для отзыва нужен сертификат и ключ")
+	}
+	log.Printf("[step-cli] step ca revoke --cert %s", certPath)
+	cmd := exec.Command("step", "ca", "revoke",
 		"--cert", certPath,
 		"--key", keyPath,
 		"--ca-url", ca.URL,
 		"--root", ca.RootCert,
-	).Run()
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return stepCLIError(err, out)
+	}
+	return nil
+}
+
+func (h *Handler) revokeBySerial(serial string) error {
+	ca := h.CA()
+	if !ca.Configured {
+		return fmt.Errorf("Step-CA не настроен. Настройте подключение в разделе Админ -> Настройки CA (/admin/ca)")
+	}
+	if !safeRevokeSerial(serial) {
+		return fmt.Errorf("пустой серийный номер")
+	}
+	passwordFile, cleanup, err := h.provisionerPasswordFile(ca.Provisioner)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	if passwordFile == "" {
+		return fmt.Errorf("для провизионера %s не задан пароль", ca.Provisioner)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	tokenCmd := exec.CommandContext(ctx, "step", revokeTokenArgs(ca.URL, ca.RootCert, ca.Provisioner, passwordFile, serial)...)
+	tokenOut, err := tokenCmd.CombinedOutput()
+	if err != nil {
+		return stepCLIError(err, tokenOut)
+	}
+	token, err := parseStepToken(string(tokenOut))
+	if err != nil {
+		return err
+	}
+	log.Printf("[step-cli] step ca revoke %s", serial)
+	revokeCmd := exec.CommandContext(ctx, "step", revokeWithTokenArgs(ca.URL, ca.RootCert, token, serial)...)
+	out, err := revokeCmd.CombinedOutput()
+	if err != nil {
+		return stepCLIError(err, out)
+	}
+	return nil
+}
+
+func revokeTokenArgs(caURL, rootCert, provisioner, passwordFile, serial string) []string {
+	return []string{
+		"ca", "token",
+		"--revoke",
+		"--provisioner", provisioner,
+		"--provisioner-password-file", passwordFile,
+		"--ca-url", caURL,
+		"--root", rootCert,
+		serial,
+	}
+}
+
+func revokeWithTokenArgs(caURL, rootCert, token, serial string) []string {
+	return []string{
+		"ca", "revoke",
+		"--token", token,
+		"--ca-url", caURL,
+		"--root", rootCert,
+		serial,
+	}
+}
+
+func parseStepToken(out string) (string, error) {
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.Count(line, ".") == 2 && !strings.ContainsAny(line, " \t") {
+			return line, nil
+		}
+	}
+	return "", fmt.Errorf("step ca token: пустой ответ")
+}
+
+func stepCLIError(err error, out []byte) error {
+	msg := strings.TrimSpace(scrubToken(string(out)))
+	if msg == "" {
+		msg = err.Error()
+	}
+	return fmt.Errorf("%s", msg)
+}
+
+func scrubToken(s string) string {
+	fields := strings.Fields(s)
+	for i, f := range fields {
+		if strings.Count(f, ".") == 2 && len(f) > 20 {
+			fields[i] = "[token]"
+		}
+	}
+	return strings.Join(fields, " ")
+}
+
+func safeRevokeSerial(serial string) bool {
+	if serial == "" || len(serial) > 100 {
+		return false
+	}
+	for _, r := range serial {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func parseCertDates(certPath string) (issued, expires *time.Time, serial string, err error) {

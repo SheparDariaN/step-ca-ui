@@ -227,6 +227,11 @@ func (h *Handler) Renew(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
 	c, _ := appdb.GetCert(h.db, id)
 	if c != nil {
+		if c.KeyPath == "" {
+			h.flash(w, r, "err", "Перевыпуск недоступен: приватный ключ хранится только у клиента")
+			http.Redirect(w, r, "/certificates", http.StatusFound)
+			return
+		}
 		keyType := c.KeyType
 		if keyType == "" {
 			keyType = "EC:P-256"
@@ -268,7 +273,17 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
 	c, _ := appdb.GetCert(h.db, id)
 	if c != nil {
-		h.revokeStep(c.CertPath, c.KeyPath)
+		var revokeErr error
+		if c.KeyPath == "" {
+			revokeErr = h.revokeBySerial(c.Serial)
+		} else {
+			revokeErr = h.revokeStep(c.CertPath, c.KeyPath)
+		}
+		if revokeErr != nil {
+			h.flash(w, r, "err", "Ошибка: "+revokeErr.Error())
+			http.Redirect(w, r, "/certificates", http.StatusFound)
+			return
+		}
 		appdb.UpdateCertStatus(h.db, id, "revoked")
 		appdb.InsertHistory(h.db, "revoke", c.Name, c.Domain, "Отозван (CRL)", si.Username, si.Role)
 		h.auditSecurity(r, fmt.Sprintf("certificate.revoke id=%d name=%s domain=%s serial=%s", c.ID, c.Name, c.Domain, c.Serial))

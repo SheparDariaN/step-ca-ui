@@ -1,6 +1,12 @@
 {{define "content"}}
 <div class="page-header">
   <div><div class="breadcrumb">certificates</div><h1>Все сертификаты</h1></div>
+  {{if hasRole .Session.Role "manager"}}
+  <form method="POST" action="/certificates/sync">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <button type="submit" class="btn btn-ghost">Синхронизировать с CA</button>
+  </form>
+  {{end}}
 </div>
 
 <!-- Панель фильтров -->
@@ -61,12 +67,14 @@
         <div class="cert-actions">
         <a href="/certificates/{{.ID}}" class="btn btn-ghost btn-sm">Детали</a>
         {{if hasRole $.Session.Role "manager"}}
+        {{if .KeyPath}}
         <form method="POST" action="/renew/{{.ID}}" style="display:inline"
           data-confirm="Перевыпустить сертификат &quot;{{.Name}}&quot;? Файл будет заменён."
           data-confirm-btn="Перевыпустить" data-confirm-class="warning" data-confirm-title="Перевыпуск">
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <button type="submit" class="btn btn-warn btn-sm" title="Перевыпустить">&#x21BA;</button>
         </form>
+        {{end}}
         <a href="/download/cert/{{.ID}}" class="btn btn-ghost btn-sm">CRT</a>
         {{if .KeyPath}}<a href="/download/key/{{.ID}}" class="btn btn-ghost btn-sm">KEY</a>{{end}}
         <a href="/download/bundle/{{.ID}}?format=zip" class="btn btn-ghost btn-sm" title="Cert + key + full chain">ZIP</a>

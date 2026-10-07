@@ -61,6 +61,38 @@ func TestStepCertificateArgsUsesPasswordFile(t *testing.T) {
 	}
 }
 
+func TestRevokeTokenArgsUsesPasswordFile(t *testing.T) {
+	t.Parallel()
+	args := revokeTokenArgs("https://step-ca:9443", "/root.crt", "admin", "/tmp/admin.pw", "1001")
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "secret-password") {
+		t.Fatal("password must not appear in step argv")
+	}
+	if !containsPair(args, "--provisioner-password-file", "/tmp/admin.pw") {
+		t.Fatalf("expected password file flag in %v", args)
+	}
+	if !contains(args, "--revoke") {
+		t.Fatalf("expected --revoke in %v", args)
+	}
+	token := "header.payload.signature-value-long"
+	revokeArgs := revokeWithTokenArgs("https://step-ca:9443", "/root.crt", token, "1001")
+	if scrubToken("revoke failed "+token) != "revoke failed [token]" {
+		t.Fatal("token must be scrubbed from step errors")
+	}
+	if !containsPair(revokeArgs, "--token", token) {
+		t.Fatalf("expected token flag in %v", revokeArgs)
+	}
+}
+
+func contains(args []string, flag string) bool {
+	for _, a := range args {
+		if a == flag {
+			return true
+		}
+	}
+	return false
+}
+
 func containsPair(args []string, flag, value string) bool {
 	for i := 0; i < len(args)-1; i++ {
 		if args[i] == flag && args[i+1] == value {

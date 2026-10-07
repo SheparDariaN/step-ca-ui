@@ -131,12 +131,14 @@
       <td><span class="badge gray">{{.KeyType}}</span></td>
       <td>
         {{if hasRole $.Session.Role "manager"}}
+        {{if .KeyPath}}
         <form method="POST" action="/renew/{{.ID}}" style="display:inline"
           data-confirm="Перевыпустить сертификат &quot;{{.Name}}&quot;? Текущий файл будет заменён новым."
           data-confirm-btn="Перевыпустить" data-confirm-class="warning" data-confirm-title="Перевыпуск сертификата">
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <button type="submit" class="btn btn-warn btn-sm">Перевыпустить</button>
         </form>
+        {{end}}
         <a href="/download/cert/{{.ID}}" class="btn btn-ghost btn-sm">CRT</a>
         {{end}}
       </td>
