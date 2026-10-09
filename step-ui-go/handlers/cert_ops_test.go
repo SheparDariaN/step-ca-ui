@@ -1,8 +1,19 @@
 package handlers
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"fmt"
+	"math/big"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNormalizeIssuePolicy(t *testing.T) {
@@ -81,6 +92,122 @@ func TestRevokeTokenArgsUsesPasswordFile(t *testing.T) {
 	}
 	if !containsPair(revokeArgs, "--token", token) {
 		t.Fatalf("expected token flag in %v", revokeArgs)
+	}
+	if contains(revokeArgs, "--cert") || contains(args, "--cert") {
+		t.Fatal("revoke by serial must not pass the leaf certificate")
+	}
+}
+
+func TestRevokeTokenArgsUsesRowProvisioner(t *testing.T) {
+	t.Parallel()
+	serial := "45354885331494592787502170066385744005"
+	args := revokeTokenArgs("https://ca.example:443", "/root.crt", "corp", "/tmp/corp.pw", serial)
+	if !containsPair(args, "--provisioner", "corp") {
+		t.Fatalf("expected provisioner corp in %v", args)
+	}
+	if args[len(args)-1] != serial {
+		t.Fatalf("expected serial as token subject, got %v", args)
+	}
+}
+
+func TestAlreadyRevoked(t *testing.T) {
+	t.Parallel()
+	if alreadyRevoked(nil) {
+		t.Fatal("nil error is not an already-revoked result")
+	}
+	if !alreadyRevoked(fmt.Errorf("The certificate has already been revoked.")) {
+		t.Fatal("already been revoked response must be treated as success")
+	}
+	if !alreadyRevoked(fmt.Errorf("certificate already revoked")) {
+		t.Fatal("already revoked response must be treated as success")
+	}
+	if alreadyRevoked(fmt.Errorf("remote error: tls: bad certificate")) {
+		t.Fatal("tls error must stay a failure")
+	}
+}
+
+func TestCertStorageDirSeparatesSameName(t *testing.T) {
+	t.Parallel()
+	first := certStorageDir("/certs", "dc01", "111")
+	second := certStorageDir("/certs", "dc01", "222")
+	if first == second {
+		t.Fatal("same name with different serials must use different directories")
+	}
+	if first != filepath.Join("/certs", "dc01", "111") || second != filepath.Join("/certs", "dc01", "222") {
+		t.Fatalf("unexpected paths: %s %s", first, second)
+	}
+}
+
+func TestCommitIssuedFilesDoesNotOverwrite(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	tempDir := filepath.Join(root, "temp-issue")
+	writeTestLeaf(t, tempDir, 111)
+	certPath, keyPath, serial, err := commitIssuedFiles(root, "dc01", tempDir)
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if serial != "111" {
+		t.Fatalf("serial: %s", serial)
+	}
+	if certPath != filepath.Join(root, "dc01", "111", "certificate.crt") {
+		t.Fatalf("cert path: %s", certPath)
+	}
+	if keyPath != filepath.Join(root, "dc01", "111", "private.key") {
+		t.Fatalf("key path: %s", keyPath)
+	}
+	original, err := os.ReadFile(certPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again := filepath.Join(root, "temp-again")
+	writeTestLeaf(t, again, 111)
+	if _, _, _, err := commitIssuedFiles(root, "dc01", again); err == nil {
+		t.Fatal("existing serial directory must not be overwritten")
+	}
+	kept, err := os.ReadFile(certPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(kept) != string(original) {
+		t.Fatal("existing certificate file was replaced")
+	}
+	other := filepath.Join(root, "temp-other")
+	writeTestLeaf(t, other, 222)
+	secondPath, _, secondSerial, err := commitIssuedFiles(root, "dc01", other)
+	if err != nil {
+		t.Fatalf("second commit: %v", err)
+	}
+	if secondSerial != "222" || secondPath == certPath {
+		t.Fatalf("second issue path: %s serial %s", secondPath, secondSerial)
+	}
+}
+
+func writeTestLeaf(t *testing.T, dir string, serial int64) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(serial),
+		Subject:      pkix.Name{CommonName: "app.example.com"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	body := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	if err := os.WriteFile(filepath.Join(dir, "certificate.crt"), body, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "private.key"), []byte("test-key"), 0600); err != nil {
+		t.Fatal(err)
 	}
 }
 

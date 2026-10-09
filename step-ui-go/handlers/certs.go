@@ -196,11 +196,8 @@ func (h *Handler) IssuePost(w http.ResponseWriter, r *http.Request) {
 		h.render(w, "issue", data)
 		return
 	}
-	certDir := filepath.Join(h.cfg.CertsDir, sanitizeName(name))
-	os.MkdirAll(certDir, 0755)
-	certPath := filepath.Join(certDir, "certificate.crt")
-	keyPath := filepath.Join(certDir, "private.key")
-	if err := h.issueWithRegisteredProvisioner(domain, certPath, keyPath, policy.Duration, policy.KeyType, policy.Purpose, provisionerName); err != nil {
+	certPath, keyPath, serial, err := h.issueIntoFreshDir(name, domain, policy.Duration, policy.KeyType, policy.Purpose, provisionerName)
+	if err != nil {
 		h.notifyAsync("", "certificate.issue_failed", "error",
 			"Certificate issue failed",
 			fmt.Sprintf("Не удалось выпустить сертификат %s для %s: %s", name, domain, err.Error()),
@@ -209,7 +206,7 @@ func (h *Handler) IssuePost(w http.ResponseWriter, r *http.Request) {
 		h.render(w, "issue", data)
 		return
 	}
-	issued, expires, serial, _ := parseCertDates(certPath)
+	issued, expires, _, _ := parseCertDates(certPath)
 	appdb.InsertCert(h.db, &models.Certificate{
 		Name: name, Domain: domain, CertPath: certPath, KeyPath: keyPath,
 		IssuedAt: issued, ExpiresAt: expires, Serial: serial, KeyType: policy.KeyType, Provisioner: provisionerName,
@@ -245,10 +242,11 @@ func (h *Handler) Renew(w http.ResponseWriter, r *http.Request) {
 			renewDuration = prov.MaxDuration
 		}
 		purpose := certPurposeFromFile(c.CertPath)
-		if err := h.issueWithRegisteredProvisioner(c.Domain, c.CertPath, c.KeyPath, renewDuration, keyType, purpose, provisionerName); err == nil {
-			issued, expires, serial, _ := parseCertDates(c.CertPath)
+		certPath, keyPath, serial, err := h.issueIntoFreshDir(c.Name, c.Domain, renewDuration, keyType, purpose, provisionerName)
+		if err == nil {
+			issued, expires, _, _ := parseCertDates(certPath)
 			appdb.InsertCert(h.db, &models.Certificate{
-				Name: c.Name, Domain: c.Domain, CertPath: c.CertPath, KeyPath: c.KeyPath,
+				Name: c.Name, Domain: c.Domain, CertPath: certPath, KeyPath: keyPath,
 				IssuedAt: issued, ExpiresAt: expires, Serial: serial, KeyType: keyType, Provisioner: provisionerName,
 			})
 			appdb.InsertHistory(h.db, "renew", c.Name, c.Domain, "Перевыпуск, тип: "+keyType+", провизионер: "+provisionerName, si.Username, si.Role)
@@ -273,13 +271,8 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.Atoi(chi.URLParam(r, "id"))
 	c, _ := appdb.GetCert(h.db, id)
 	if c != nil {
-		var revokeErr error
-		if c.KeyPath == "" {
-			revokeErr = h.revokeBySerial(c.Serial)
-		} else {
-			revokeErr = h.revokeStep(c.CertPath, c.KeyPath)
-		}
-		if revokeErr != nil {
+		revokeErr := h.revokeBySerial(c.Serial, c.Provisioner)
+		if revokeErr != nil && !alreadyRevoked(revokeErr) {
 			h.flash(w, r, "err", "Ошибка: "+revokeErr.Error())
 			http.Redirect(w, r, "/certificates", http.StatusFound)
 			return
@@ -413,11 +406,16 @@ func (h *Handler) importUpload(w http.ResponseWriter, r *http.Request, si *model
 		return
 	}
 	defer certFile.Close()
-	certDir := filepath.Join(h.cfg.CertsDir, sanitizeName(name))
-	os.MkdirAll(certDir, 0755)
-	certPath := filepath.Join(certDir, "certificate.crt")
-	keyPath := filepath.Join(certDir, "private.key")
+	tempDir, err := newIssueTemp(h.cfg.CertsDir)
+	if err != nil {
+		data["Msgs"] = []models.FlashMsg{{Type: "err", Text: "Ошибка сохранения файла"}}
+		h.render(w, "import", data)
+		return
+	}
+	certPath := filepath.Join(tempDir, "certificate.crt")
+	keyPath := filepath.Join(tempDir, "private.key")
 	if err := saveUploadedFile(certFile, certPath); err != nil {
+		os.RemoveAll(tempDir)
 		data["Msgs"] = []models.FlashMsg{{Type: "err", Text: "Ошибка сохранения файла"}}
 		h.render(w, "import", data)
 		return
@@ -430,6 +428,7 @@ func (h *Handler) importUpload(w http.ResponseWriter, r *http.Request, si *model
 	}
 	issued, expires, serial, err := parseCertDates(certPath)
 	if err != nil || serial == "" {
+		os.RemoveAll(tempDir)
 		data["Msgs"] = []models.FlashMsg{{Type: "err", Text: "Не удалось прочитать сертификат"}}
 		h.render(w, "import", data)
 		return
@@ -437,17 +436,24 @@ func (h *Handler) importUpload(w http.ResponseWriter, r *http.Request, si *model
 	if keyPath != "" {
 		cert, certErr := readPEMCert(certPath)
 		if certErr != nil {
-			os.Remove(keyPath)
+			os.RemoveAll(tempDir)
 			data["Msgs"] = []models.FlashMsg{{Type: "err", Text: "Не удалось прочитать сертификат"}}
 			h.render(w, "import", data)
 			return
 		}
 		if pairErr := validateKeyPair(cert, keyPath); pairErr != nil {
-			os.Remove(keyPath)
+			os.RemoveAll(tempDir)
 			data["Msgs"] = []models.FlashMsg{{Type: "err", Text: "Приватный ключ не соответствует сертификату: " + pairErr.Error()}}
 			h.render(w, "import", data)
 			return
 		}
+	}
+	certPath, keyPath, serial, err = commitIssuedFiles(h.cfg.CertsDir, name, tempDir)
+	if err != nil {
+		os.RemoveAll(tempDir)
+		data["Msgs"] = []models.FlashMsg{{Type: "err", Text: "Ошибка: " + err.Error()}}
+		h.render(w, "import", data)
+		return
 	}
 	kt := getCertKeyType(certPath)
 	if err := appdb.InsertCert(h.db, &models.Certificate{

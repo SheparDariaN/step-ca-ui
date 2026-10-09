@@ -222,29 +222,7 @@ func certPurposeFromFile(certPath string) string {
 	}
 }
 
-func (h *Handler) revokeStep(certPath, keyPath string) error {
-	ca := h.CA()
-	if !ca.Configured {
-		return fmt.Errorf("Step-CA не настроен. Настройте подключение в разделе Админ -> Настройки CA (/admin/ca)")
-	}
-	if certPath == "" || keyPath == "" {
-		return fmt.Errorf("для отзыва нужен сертификат и ключ")
-	}
-	log.Printf("[step-cli] step ca revoke --cert %s", certPath)
-	cmd := exec.Command("step", "ca", "revoke",
-		"--cert", certPath,
-		"--key", keyPath,
-		"--ca-url", ca.URL,
-		"--root", ca.RootCert,
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return stepCLIError(err, out)
-	}
-	return nil
-}
-
-func (h *Handler) revokeBySerial(serial string) error {
+func (h *Handler) revokeBySerial(serial, provisionerName string) error {
 	ca := h.CA()
 	if !ca.Configured {
 		return fmt.Errorf("Step-CA не настроен. Настройте подключение в разделе Админ -> Настройки CA (/admin/ca)")
@@ -252,17 +230,20 @@ func (h *Handler) revokeBySerial(serial string) error {
 	if !safeRevokeSerial(serial) {
 		return fmt.Errorf("пустой серийный номер")
 	}
-	passwordFile, cleanup, err := h.provisionerPasswordFile(ca.Provisioner)
+	if provisionerName == "" {
+		provisionerName = ca.Provisioner
+	}
+	passwordFile, cleanup, err := h.provisionerPasswordFile(provisionerName)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 	if passwordFile == "" {
-		return fmt.Errorf("для провизионера %s не задан пароль", ca.Provisioner)
+		return fmt.Errorf("для провизионера %s не задан пароль", provisionerName)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	tokenCmd := exec.CommandContext(ctx, "step", revokeTokenArgs(ca.URL, ca.RootCert, ca.Provisioner, passwordFile, serial)...)
+	tokenCmd := exec.CommandContext(ctx, "step", revokeTokenArgs(ca.URL, ca.RootCert, provisionerName, passwordFile, serial)...)
 	tokenOut, err := tokenCmd.CombinedOutput()
 	if err != nil {
 		return stepCLIError(err, tokenOut)
@@ -271,13 +252,75 @@ func (h *Handler) revokeBySerial(serial string) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("[step-cli] step ca revoke %s", serial)
+	log.Printf("[step-cli] step ca revoke %s provisioner=%s", serial, provisionerName)
 	revokeCmd := exec.CommandContext(ctx, "step", revokeWithTokenArgs(ca.URL, ca.RootCert, token, serial)...)
 	out, err := revokeCmd.CombinedOutput()
 	if err != nil {
 		return stepCLIError(err, out)
 	}
 	return nil
+}
+
+func alreadyRevoked(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "already revoked") || strings.Contains(msg, "already been revoked")
+}
+
+func certStorageDir(certsDir, name, serial string) string {
+	return filepath.Join(certsDir, sanitizeName(name), serial)
+}
+
+func newIssueTemp(certsDir string) (string, error) {
+	base := filepath.Join(certsDir, ".tmp")
+	if err := os.MkdirAll(base, 0755); err != nil {
+		return "", err
+	}
+	return os.MkdirTemp(base, "issue-")
+}
+
+// commitIssuedFiles переносит временный каталог в CertsDir/<имя>/<serial>/.
+// Существующий каталог этого serial не перезаписывается.
+func commitIssuedFiles(certsDir, name, tempDir string) (certPath, keyPath, serial string, err error) {
+	srcCert := filepath.Join(tempDir, "certificate.crt")
+	_, _, serial, err = parseCertDates(srcCert)
+	if err != nil || !safeRevokeSerial(serial) {
+		return "", "", "", fmt.Errorf("не удалось прочитать сертификат")
+	}
+	dest := certStorageDir(certsDir, name, serial)
+	if _, statErr := os.Stat(dest); statErr == nil {
+		return "", "", "", fmt.Errorf("каталог сертификата уже существует")
+	} else if !os.IsNotExist(statErr) {
+		return "", "", "", statErr
+	}
+	if err = os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		return "", "", "", err
+	}
+	if err = os.Rename(tempDir, dest); err != nil {
+		return "", "", "", err
+	}
+	certPath = filepath.Join(dest, "certificate.crt")
+	keyPath = filepath.Join(dest, "private.key")
+	if _, statErr := os.Stat(keyPath); statErr != nil {
+		keyPath = ""
+	}
+	return certPath, keyPath, serial, nil
+}
+
+func (h *Handler) issueIntoFreshDir(name, domain, duration, keyType, purpose, provisionerName string) (certPath, keyPath, serial string, err error) {
+	tempDir, err := newIssueTemp(h.cfg.CertsDir)
+	if err != nil {
+		return "", "", "", err
+	}
+	certPath = filepath.Join(tempDir, "certificate.crt")
+	keyPath = filepath.Join(tempDir, "private.key")
+	if err = h.issueWithRegisteredProvisioner(domain, certPath, keyPath, duration, keyType, purpose, provisionerName); err != nil {
+		os.RemoveAll(tempDir)
+		return "", "", "", err
+	}
+	return commitIssuedFiles(h.cfg.CertsDir, name, tempDir)
 }
 
 func revokeTokenArgs(caURL, rootCert, provisioner, passwordFile, serial string) []string {
@@ -390,12 +433,24 @@ func getCertKeyType(certPath string) string {
 func scanExistingCerts(certsDir string, d *sql.DB) []map[string]string {
 	var found []map[string]string
 	filepath.WalkDir(certsDir, func(path string, de os.DirEntry, err error) error {
-		if err != nil || de.IsDir() {
+		if err != nil || de == nil {
+			return nil
+		}
+		if de.IsDir() {
+			if de.Name() == ".tmp" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if strings.HasSuffix(path, "certificate.crt") {
 			dir := filepath.Dir(path)
 			name := filepath.Base(dir)
+			if safeRevokeSerial(name) {
+				parent := filepath.Base(filepath.Dir(dir))
+				if parent != "" && parent != "." {
+					name = parent
+				}
+			}
 			keyPath := filepath.Join(dir, "private.key")
 			if _, e := os.Stat(keyPath); e != nil {
 				keyPath = ""

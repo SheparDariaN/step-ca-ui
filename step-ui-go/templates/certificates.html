@@ -69,7 +69,7 @@
         {{if hasRole $.Session.Role "manager"}}
         {{if .KeyPath}}
         <form method="POST" action="/renew/{{.ID}}" style="display:inline"
-          data-confirm="Перевыпустить сертификат &quot;{{.Name}}&quot;? Файл будет заменён."
+          data-confirm="Перевыпустить сертификат &quot;{{.Name}}&quot;? Будет создан новый сертификат, прежний файл сохранится."
           data-confirm-btn="Перевыпустить" data-confirm-class="warning" data-confirm-title="Перевыпуск">
           <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
           <button type="submit" class="btn btn-warn btn-sm" title="Перевыпустить">&#x21BA;</button>
